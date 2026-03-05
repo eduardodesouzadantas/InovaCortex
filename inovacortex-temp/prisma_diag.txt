@@ -1,0 +1,20 @@
+
+Error: Prisma schema validation - (validate wasm)
+Error code: P1012
+[1;91merror[0m: [1mThe model "Prospect" cannot be defined because a model with that name already exists.[0m
+  [1;94m-->[0m  [4mprisma\schema.prisma:1186[0m
+[1;94m   | [0m
+[1;94m1185 | [0m
+[1;94m1186 | [0mmodel [1;91mProspect[0m {
+[1;94m   | [0m
+[1;91merror[0m: [1mThe model "OutboundMessage" cannot be defined because a model with that name already exists.[0m
+  [1;94m-->[0m  [4mprisma\schema.prisma:1229[0m
+[1;94m   | [0m
+[1;94m1228 | [0m
+[1;94m1229 | [0mmodel [1;91mOutboundMessage[0m {
+[1;94m   | [0m
+
+Validation Error Count: 2
+[Context: validate]
+
+Prisma CLI Version : 5.22.0

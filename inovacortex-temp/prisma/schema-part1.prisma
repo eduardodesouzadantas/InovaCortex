@@ -1,0 +1,500 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = "file:./dev.db"
+}
+
+// ─── V9: Multi-Tenant Core Models ─────────────────────────────────────────────
+
+model Organization {
+  id                     String @id @default(uuid())
+  name                   String
+  slug                   String @unique
+  plan                   String @default("free") // free | growth | enterprise
+  maxAssessmentsPerMonth Int    @default(50)
+  maxUsers               Int    @default(5)
+  industry               String @default("Services") // Added for V30/V31 benchmarks
+
+  // V10: Stripe Billing
+  stripeCustomerId     String?
+  stripeSubscriptionId String?
+  subscriptionStatus   String    @default("none") // active | past_due | canceled | trialing | none
+  currentPeriodStart   DateTime?
+  currentPeriodEnd     DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @default(now())
+
+  users          User[]
+  assessments    Assessment[]
+  usageEvents    UsageEvent[]
+  usageSnapshots MonthlyUsageSnapshot[]
+  whatsappUsers  WhatsAppUser[]
+  salesReps      SalesRep[]
+  commissionRules CommissionRule[]
+
+  @@map("organizations")
+}
+
+// ─── V10: Usage Metering ──────────────────────────────────────────────────────
+
+model UsageEvent {
+  id             String       @id @default(uuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id])
+  type           String // assessmentCreated | dossierGenerated | pdfGenerated | proposalGenerated | presalesGenerated
+  quantity       Int          @default(1)
+  metadata       String? // JSON string: { assessmentId?, slug?, ... }
+  createdAt      DateTime     @default(now())
+
+  @@index([organizationId, type, createdAt])
+  @@map("usage_events")
+}
+
+model MonthlyUsageSnapshot {
+  id                 String       @id @default(uuid())
+  organizationId     String
+  organization       Organization @relation(fields: [organizationId], references: [id])
+  month              String // YYYY-MM
+  assessmentsCount   Int          @default(0)
+  pdfCount           Int          @default(0)
+  proposalCount      Int          @default(0)
+  aiGenerationsCount Int          @default(0)
+  dossierCount       Int          @default(0)
+  createdAt          DateTime     @default(now())
+  updatedAt          DateTime     @updatedAt
+
+  @@unique([organizationId, month])
+  @@map("monthly_usage_snapshots")
+}
+
+model User {
+  id             String       @id @default(uuid())
+  email          String       @unique
+  passwordHash   String
+  role           String       @default("admin") // owner | admin | closer | viewer
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id])
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+  
+  salesReps      SalesRep[]
+  managedAssignments LeadAssignment[]
+
+  @@map("users")
+}
+
+// ─── Core Assessment Model ─────────────────────────────────────────────────────
+
+model Assessment {
+  id        String   @id @default(uuid())
+  createdAt DateTime @default(now())
+
+  // V9: Multi-tenant isolation
+  organizationId String       @default("default-org-id")
+  organization   Organization @relation(fields: [organizationId], references: [id])
+
+  // Passo 1: Dados
+  name            String
+  email           String
+  company         String
+  role            String
+  phone           String? // Capturado para disparo de WhatsApp
+  whatsappConsent Boolean @default(false) // Consentimento LGPD
+
+  // Passo 2: Contexto
+  segment   String
+  teamSize  String
+  volumeDay String
+  channels  String // Array of strings stored as JSON string
+
+  // Passo 3: Stack
+  stack String // CRM, ERP, API, Make, Zapier, etc stored as JSON string
+
+  // Passo 4: Dores
+  pains   String // Array of strings stored as JSON string
+  urgency String
+  goal    String
+
+  // Auto-Classification Scoring
+  scoreTotal          Int
+  scoreBreakdown      String // Object with A, B, C, D, E scores stored as JSON string
+  classification      String // "Alta prioridade" | "Boa oportunidade" | "Exploratória"
+  recommendedMissions String // Array of strings stored as JSON string
+
+  // CRM (Missão V4)
+  status        String  @default("Novo") // Novo, Qualificado, Contatado, Agendado, Fechado, Perdido
+  internalNotes String? // Rascunhos livres
+
+  artifactReport    ArtifactReport?
+  messageLogs       MessageLog[]
+  auditEvents       AuditEvent[]
+  preSalesArtifacts PreSalesArtifact[]
+  roiProjection     RoiProjection?
+  proposals         Proposal[]
+  assignments       LeadAssignment[]
+
+  @@map("assessments")
+}
+
+// ─── Derived Models (all scoped by organizationId via Assessment) ──────────────
+
+model Proposal {
+  id           String     @id @default(uuid())
+  assessmentId String
+  assessment   Assessment @relation(fields: [assessmentId], references: [id])
+  version      Int        @default(1)
+  publicSlug   String     @unique
+
+  // V9: Direct org scoping for standalone queries
+  organizationId String @default("default-org-id")
+
+  // Structured JSON fields (SQLite stores as TEXT)
+  modules          String // JSON: ProposalModule[]
+  pricingEstimate  String // JSON: { min, max, currency, basis }
+  roiSnapshot      String // JSON: ROI data at generation time
+  presalesSnapshot String // JSON: PreSales artifact snapshot (nullable)
+
+  status      String  @default("draft") // draft | sent | viewed | accepted | rejected
+  customNotes String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("proposals")
+}
+
+model RoiProjection {
+  id           String     @id @default(uuid())
+  assessmentId String     @unique
+  assessment   Assessment @relation(fields: [assessmentId], references: [id])
+
+  // Base projection
+  operationalSavingsEstimate Float
+  revenueIncreaseEstimate    Float
+  monthlyHoursRecovered      Float
+  estimatedPaybackMonths     Float
+  confidenceLevel            String // "Baixa" | "Média" | "Alta"
+
+  // Manual override (admin simulator)
+  manualOverride Boolean @default(false)
+  avgHourlyCost  Float?
+  avgTicket      Float?
+  conversionRate Float?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("roi_projections")
+}
+
+model ArtifactReport {
+  id           String     @id @default(uuid())
+  assessmentId String     @unique
+  assessment   Assessment @relation(fields: [assessmentId], references: [id])
+  createdAt    DateTime   @default(now())
+
+  contentJson String
+  publicSlug  String @unique
+  version     Int    @default(1)
+
+  @@map("artifact_reports")
+}
+
+model MessageLog {
+  id              String     @id @default(uuid())
+  assessmentId    String
+  assessment      Assessment @relation(fields: [assessmentId], references: [id])
+  provider        String // "whatsapp_meta"
+  status          String // "sent", "delivered", "read", "failed"
+  payloadRedacted String
+  createdAt       DateTime   @default(now())
+
+  @@map("message_logs")
+}
+
+model AuditEvent {
+  id           String     @id @default(uuid())
+  assessmentId String
+  assessment   Assessment @relation(fields: [assessmentId], references: [id])
+  action       String // Includes: benchmarkGenerated | benchmarkViewed | benchmarkExported
+  details      String?
+
+  // V9: Direct org scoping
+  organizationId String @default("default-org-id")
+
+  createdAt DateTime @default(now())
+
+  @@map("audit_events")
+}
+
+model PreSalesArtifact {
+  id                  String     @id @default(uuid())
+  assessmentId        String
+  assessment          Assessment @relation(fields: [assessmentId], references: [id])
+  version             Int        @default(1)
+  executiveSummary    String
+  diagnosticQuestions String
+  initialArchitecture String
+  createdAt           DateTime   @default(now())
+
+  @@map("presales_artifacts")
+}
+
+model SystemSetting {
+  id             String   @id @default(uuid())
+  key            String
+  organizationId String   @default("default-org-id")
+  value          String // Stored encrypted via AES-256-GCM
+  updatedAt      DateTime @updatedAt
+
+  @@unique([key, organizationId])
+  @@map("system_settings")
+}
+
+model AIInvocation {
+  id               String   @id @default(uuid())
+  assessmentId     String
+  organizationId   String   @default("default-org-id")
+  model            String
+  promptTokens     Int      @default(0)
+  completionTokens Int      @default(0)
+  estimatedCostUsd Float    @default(0)
+  latencyMs        Int
+  status           String
+  errorMessage     String?
+  createdAt        DateTime @default(now())
+
+  @@map("ai_invocations")
+}
+
+// ─── V11: Observability Alerts ────────────────────────────────────────────────
+
+model AlertEvent {
+  id             String    @id @default(uuid())
+  organizationId String    @default("default-org-id")
+  type           String // webhookFailure | aiFailureRate | usageThreshold | limitExceeded
+  severity       String    @default("warning") // info | warning | critical
+  message        String
+  metadata       String? // JSON
+  resolved       Boolean   @default(false)
+  resolvedAt     DateTime?
+  createdAt      DateTime  @default(now())
+
+  @@index([organizationId, createdAt])
+  @@index([organizationId, type, resolved])
+  @@map("alert_events")
+}
+
+// ─── V12: Execution Engine ─────────────────────────────────────────────────────
+
+model ClientWorkspace {
+  id                   String    @id @default(uuid())
+  organizationId       String
+  assessmentId         String
+  proposalId           String    @unique
+  /// provisioning_hold | provisioning | active | paused | completed
+  status               String    @default("provisioning")
+  modulesEnabled       String // JSON: string[] of enabled module IDs
+  goLiveAt             DateTime?
+  /// Magic token for client portal — sent via onboarding pack URL
+  workspacePublicToken String    @unique @default(uuid())
+  /// If true, the org explicitly allows real name in published proof assets
+  allowPublicName      Boolean   @default(false)
+  createdAt            DateTime  @default(now())
+  updatedAt            DateTime  @default(now())
+
+  tasks     ImplementationTask[]
+  checklist IntegrationChecklistItem[]
+  uploads   WorkspaceUpload[]
+  comments  WorkspaceComment[]
+
+  @@index([organizationId, status])
+  @@map("client_workspaces")
+}
+
+model ImplementationTask {
+  id          String          @id @default(uuid())
+  workspaceId String
+  workspace   ClientWorkspace @relation(fields: [workspaceId], references: [id])
+  title       String
+  description String
+  ownerRole   String          @default("admin") // owner | admin | closer
+  status      String          @default("todo") // todo | doing | blocked | done
+  phase       String          @default("setup") // setup | development | launch | handoff
+  orderIndex  Int             @default(0)
+  dueAt       DateTime?
+  doneAt      DateTime?
+  createdAt   DateTime        @default(now())
+
+  comments WorkspaceComment[]
+
+  @@index([workspaceId, status])
+  @@map("implementation_tasks")
+}
+
+model IntegrationChecklistItem {
+  id          String          @id @default(uuid())
+  workspaceId String
+  workspace   ClientWorkspace @relation(fields: [workspaceId], references: [id])
+  system      String // WhatsApp, Instagram, CRM, ERP, Make, Zapier, etc
+  item        String // "Gerar token", "Criar webhook", "Mapear campos"
+  status      String          @default("pending") // pending | provided | verified
+  notes       String?
+  createdAt   DateTime        @default(now())
+
+  @@index([workspaceId, system])
+  @@map("integration_checklist_items")
+}
+
+// ─── V19: Client Portal Uploads + Comments ────────────────────────────────────
+
+model WorkspaceUpload {
+  id          String          @id @default(uuid())
+  orgId       String
+  workspaceId String
+  workspace   ClientWorkspace @relation(fields: [workspaceId], references: [id])
+  /// logo | brand | copy | credentials | other
+  type        String          @default("other")
+  filename    String
+  url         String
+  sizeBytes   Int?
+  createdAt   DateTime        @default(now())
+
+  @@index([workspaceId])
+  @@index([orgId, type])
+  @@map("workspace_uploads")
+}
+
+model WorkspaceComment {
+  id          String              @id @default(uuid())
+  orgId       String
+  workspaceId String
+  workspace   ClientWorkspace     @relation(fields: [workspaceId], references: [id])
+  taskId      String?
+  task        ImplementationTask? @relation(fields: [taskId], references: [id], onDelete: SetNull)
+  /// client | team
+  authorType  String              @default("client")
+  body        String
+  createdAt   DateTime            @default(now())
+
+  @@index([workspaceId])
+  @@index([taskId])
+  @@map("workspace_comments")
+}
+
+// ─── R2: Content Engine ────────────────────────────────────────────────────────
+
+model ContentArtifact {
+  id             String  @id @default(uuid())
+  organizationId String
+  assessmentId   String? // Optional link to source lead
+  proposalId     String? // Optional link to source proposal
+
+  type    String // linkedin | instagram | case_breakdown | authority_thread | video_script
+  version Int    @default(1)
+  status  String @default("draft") // draft | reviewed | approved | scheduled | posted
+
+  title    String
+  body     String // Main content text
+  hook     String? // Opening hook (especially for social)
+  cta      String? // Call-to-action at the end
+  hashtags String? // JSON: string[] — for social posts
+  metadata String? // JSON: any structured extra data (ROI numbers used, etc.)
+
+  // Review & approval trail
+  reviewedBy   String?
+  reviewedAt   DateTime?
+  approvedBy   String?
+  approvedAt   DateTime?
+  scheduledFor DateTime?
+  postedAt     DateTime?
+
+  // Source data snapshot (for auditability)
+  roiSnapshot   String? // JSON: ROI numbers at generation time
+  sourceInsight String? // The real insight that drove this piece
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @default(now())
+
+  @@index([organizationId, type, status])
+  @@index([organizationId, createdAt])
+  @@map("content_artifacts")
+}
+
+// ─── R3: Funnel Automation ────────────────────────────────────────────────────
+
+model LeadSequence {
+  id             String         @id @default(uuid())
+  organizationId String
+  assessmentId   String         @unique
+  phone          String
+  scoreTier      String // hot | warm | cold
+  status         String         @default("active") // active | paused | completed | opted_out
+  currentStage   String         @default("post_click")
+  lastMessageAt  DateTime?
+  nextAllowedAt  DateTime?
+  convertedAt    DateTime?
+  optedOutAt     DateTime?
+  steps          SequenceStep[]
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @default(now())
+
+  @@index([organizationId, status, currentStage])
+  @@index([organizationId, nextAllowedAt])
+  @@map("lead_sequences")
+}
+
+model SequenceStep {
+  id          String       @id @default(uuid())
+  sequenceId  String
+  sequence    LeadSequence @relation(fields: [sequenceId], references: [id])
+  stage       String
+  channel     String       @default("whatsapp")
+  templateKey String
+  messageBody String
+  scoreTier   String
+  status      String       @default("pending") // pending | sent | delivered | read | replied | bounced
+  sentAt      DateTime?
+  deliveredAt DateTime?
+  repliedAt   DateTime?
+  waMessageId String?
+  createdAt   DateTime     @default(now())
+
+  @@index([sequenceId, stage])
+  @@index([sequenceId, status])
+  @@map("sequence_steps")
+}
+
+// ─── R4: Authority Amplifier ──────────────────────────────────────────────────
+
+model AuthorityAsset {
+  id             String @id @default(uuid())
+  organizationId String
+
+  // Source links (all optional — can be generated from partial data)
+  workspaceId  String? // Link to completed workspace
+  assessmentId String?
+  proposalId   String?
+
+  // Asset classification
+  type    String // case_study | linkedin_post | article | video_script | stat_card
+  status  String @default("internal") // internal | anonymized | approved | published
+  version Int    @default(1)
+
+  // Core content
+  title       String
+  headline    String // 1-sentence impact statement
+  body        String // Full narrative content
+  keyMetrics  String // JSON: { savings, hoursRecovered, paybackMonths, conversionRate }
+  modules     String? // JSON: string[] — which modules were deployed
+  sector      String? // Anonymized sector label (e.g. "Clínica Médica", "Imobiliária")
+  companySize String? // "5-20 funcionários", "20-80 funcionários", etc.
+
+  // Anonymization

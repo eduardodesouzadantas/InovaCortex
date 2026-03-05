@@ -1,0 +1,86 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = "file:./dev.db"
+}
+
+model Organization {
+  id             String @id @default(uuid())
+  slug           String @unique
+  salesReps      SalesRep[]
+  commissionRules CommissionRule[]
+  users          User[]
+}
+
+model User {
+  id             String       @id @default(uuid())
+  email          String       @unique
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id])
+  salesReps      SalesRep[]
+  managedAssignments LeadAssignment[]
+}
+
+model Assessment {
+  id             String @id @default(uuid())
+  name           String
+  company        String
+  assignments    LeadAssignment[]
+}
+
+model SalesRep {
+  id             String   @id @default(uuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id])
+  userId         String?
+  user           User?    @relation(fields: [userId], references: [id])
+  name           String
+  role           String   @default("SDR")
+  active         Boolean  @default(true)
+  assignments    LeadAssignment[]
+  targets        SalesTarget[]
+  payouts        CommissionPayout[]
+}
+
+model LeadAssignment {
+  id               String   @id @default(uuid())
+  assessmentId     String
+  assessment       Assessment @relation(fields: [assessmentId], references: [id])
+  salesRepId       String
+  salesRep         SalesRep @relation(fields: [salesRepId], references: [id])
+  assignedByUserId String?
+  assignedBy       User?    @relation(fields: [assignedByUserId], references: [id])
+  status           String   @default("active")
+  assignedAt       DateTime @default(now())
+}
+
+model SalesTarget {
+  id         String   @id @default(uuid())
+  salesRepId String
+  salesRep   SalesRep @relation(fields: [salesRepId], references: [id])
+  month      String
+  targetCents Int     @default(0)
+}
+
+model CommissionRule {
+  id             String   @id @default(uuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id])
+  type           String   @default("percent")
+  value          Int
+  appliesTo      String   @default("payment")
+  payouts        CommissionPayout[]
+}
+
+model CommissionPayout {
+  id               String   @id @default(uuid())
+  salesRepId       String
+  salesRep         SalesRep @relation(fields: [salesRepId], references: [id])
+  commissionRuleId String?
+  rule             CommissionRule? @relation(fields: [commissionRuleId], references: [id])
+  amountCents      Int
+  status           String   @default("pending")
+}
