@@ -14,8 +14,8 @@ export function middleware(request: NextRequest) {
         response.headers.set("Cache-Control", "private, no-store");
     }
 
-    // All API routes: prevent caching of sensitive data
-    if (pathname.startsWith("/api/")) {
+    // All API routes except PDF (middleware breaks binary streams in Next.js)
+    if (pathname.startsWith("/api/") && !pathname.startsWith("/api/pdf/")) {
         response.headers.set("X-Content-Type-Options", "nosniff");
         response.headers.set("X-Frame-Options", "DENY");
     }
