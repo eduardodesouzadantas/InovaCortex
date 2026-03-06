@@ -1,0 +1,1689 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = "file:./dev.db"
+}
+
+model Organization {
+  id                     String                 @id @default(uuid())
+  name                   String
+  slug                   String                 @unique
+  plan                   String                 @default("free")
+  maxAssessmentsPerMonth Int                    @default(50)
+  maxUsers               Int                    @default(5)
+  industry               String                 @default("Services")
+  stripeCustomerId       String?
+  stripeSubscriptionId   String?
+  subscriptionStatus     String                 @default("none")
+  currentPeriodStart     DateTime?
+  currentPeriodEnd       DateTime?
+  createdAt              DateTime               @default(now())
+  updatedAt              DateTime               @default(now())
+  assessments            Assessment[]
+  commissionRules        CommissionRule[]
+  contacts               Contact[]
+  usageSnapshots         MonthlyUsageSnapshot[]
+  salesReps              SalesRep[]
+  usageEvents            UsageEvent[]
+  users                  User[]
+  whatsappCampaigns      WhatsAppCampaign[]
+  whatsappConversations  WhatsAppConversation[]
+  whatsappTemplates      WhatsAppTemplate[]
+  whatsappUsers          WhatsAppUser[]
+
+  @@map("organizations")
+}
+
+model UsageEvent {
+  id             String       @id @default(uuid())
+  organizationId String
+  type           String
+  quantity       Int          @default(1)
+  metadata       String?
+  createdAt      DateTime     @default(now())
+  organization   Organization @relation(fields: [organizationId], references: [id])
+
+  @@index([organizationId, type, createdAt])
+  @@map("usage_events")
+}
+
+model MonthlyUsageSnapshot {
+  id                 String       @id @default(uuid())
+  organizationId     String
+  month              String
+  assessmentsCount   Int          @default(0)
+  pdfCount           Int          @default(0)
+  proposalCount      Int          @default(0)
+  aiGenerationsCount Int          @default(0)
+  dossierCount       Int          @default(0)
+  createdAt          DateTime     @default(now())
+  updatedAt          DateTime     @updatedAt
+  organization       Organization @relation(fields: [organizationId], references: [id])
+
+  @@unique([organizationId, month])
+  @@map("monthly_usage_snapshots")
+}
+
+model User {
+  id                            String                 @id @default(uuid())
+  email                         String                 @unique
+  passwordHash                  String
+  role                          String                 @default("admin")
+  organizationId                String
+  createdAt                     DateTime               @default(now())
+  updatedAt                     DateTime               @updatedAt
+  managedAssignments            LeadAssignment[]
+  salesReps                     SalesRep[]
+  organization                  Organization           @relation(fields: [organizationId], references: [id])
+  assignedWhatsAppConversations WhatsAppConversation[]
+
+  @@map("users")
+}
+
+model Assessment {
+  id                  String             @id @default(uuid())
+  createdAt           DateTime           @default(now())
+  organizationId      String             @default("default-org-id")
+  name                String
+  email               String
+  company             String
+  role                String
+  phone               String?
+  whatsappConsent     Boolean            @default(false)
+  segment             String
+  teamSize            String
+  volumeDay           String
+  channels            String
+  stack               String
+  pains               String
+  urgency             String
+  goal                String
+  scoreTotal          Int
+  scoreBreakdown      String
+  classification      String
+  recommendedMissions String
+  status              String             @default("Novo")
+  internalNotes       String?
+  artifactReport      ArtifactReport?
+  organization        Organization       @relation(fields: [organizationId], references: [id])
+  auditEvents         AuditEvent[]
+  assignments         LeadAssignment[]
+  messageLogs         MessageLog[]
+  preSalesArtifacts   PreSalesArtifact[]
+  proposals           Proposal[]
+  roiProjection       RoiProjection?
+
+  @@map("assessments")
+}
+
+model Proposal {
+  id               String     @id @default(uuid())
+  assessmentId     String
+  version          Int        @default(1)
+  publicSlug       String     @unique
+  organizationId   String     @default("default-org-id")
+  modules          String
+  pricingEstimate  String
+  roiSnapshot      String
+  presalesSnapshot String
+  status           String     @default("draft")
+  customNotes      String?
+  createdAt        DateTime   @default(now())
+  updatedAt        DateTime   @updatedAt
+  assessment       Assessment @relation(fields: [assessmentId], references: [id])
+
+  @@map("proposals")
+}
+
+model RoiProjection {
+  id                         String     @id @default(uuid())
+  assessmentId               String     @unique
+  operationalSavingsEstimate Float
+  revenueIncreaseEstimate    Float
+  monthlyHoursRecovered      Float
+  estimatedPaybackMonths     Float
+  confidenceLevel            String
+  manualOverride             Boolean    @default(false)
+  avgHourlyCost              Float?
+  avgTicket                  Float?
+  conversionRate             Float?
+  createdAt                  DateTime   @default(now())
+  updatedAt                  DateTime   @updatedAt
+  assessment                 Assessment @relation(fields: [assessmentId], references: [id])
+
+  @@map("roi_projections")
+}
+
+model ArtifactReport {
+  id           String     @id @default(uuid())
+  assessmentId String     @unique
+  createdAt    DateTime   @default(now())
+  contentJson  String
+  publicSlug   String     @unique
+  version      Int        @default(1)
+  assessment   Assessment @relation(fields: [assessmentId], references: [id])
+
+  @@map("artifact_reports")
+}
+
+model MessageLog {
+  id              String     @id @default(uuid())
+  assessmentId    String
+  provider        String
+  status          String
+  payloadRedacted String
+  createdAt       DateTime   @default(now())
+  assessment      Assessment @relation(fields: [assessmentId], references: [id])
+
+  @@map("message_logs")
+}
+
+model AuditEvent {
+  id             String     @id @default(uuid())
+  assessmentId   String
+  action         String
+  details        String?
+  organizationId String     @default("default-org-id")
+  createdAt      DateTime   @default(now())
+  assessment     Assessment @relation(fields: [assessmentId], references: [id])
+
+  @@map("audit_events")
+}
+
+model PreSalesArtifact {
+  id                  String     @id @default(uuid())
+  assessmentId        String
+  version             Int        @default(1)
+  executiveSummary    String
+  diagnosticQuestions String
+  initialArchitecture String
+  createdAt           DateTime   @default(now())
+  assessment          Assessment @relation(fields: [assessmentId], references: [id])
+
+  @@map("presales_artifacts")
+}
+
+model SystemSetting {
+  id             String   @id @default(uuid())
+  key            String
+  organizationId String   @default("default-org-id")
+  value          String
+  updatedAt      DateTime @updatedAt
+
+  @@unique([key, organizationId])
+  @@map("system_settings")
+}
+
+model AIInvocation {
+  id               String   @id @default(uuid())
+  assessmentId     String
+  organizationId   String   @default("default-org-id")
+  model            String
+  promptTokens     Int      @default(0)
+  completionTokens Int      @default(0)
+  estimatedCostUsd Float    @default(0)
+  latencyMs        Int
+  status           String
+  errorMessage     String?
+  createdAt        DateTime @default(now())
+
+  @@map("ai_invocations")
+}
+
+model AlertEvent {
+  id             String    @id @default(uuid())
+  organizationId String    @default("default-org-id")
+  type           String
+  severity       String    @default("warning")
+  message        String
+  metadata       String?
+  resolved       Boolean   @default(false)
+  resolvedAt     DateTime?
+  createdAt      DateTime  @default(now())
+
+  @@index([organizationId, createdAt])
+  @@index([organizationId, type, resolved])
+  @@map("alert_events")
+}
+
+model ClientWorkspace {
+  id                   String                     @id @default(uuid())
+  organizationId       String
+  assessmentId         String
+  proposalId           String                     @unique
+  /// provisioning_hold | provisioning | active | paused | completed
+  status               String                     @default("provisioning")
+  modulesEnabled       String
+  goLiveAt             DateTime?
+  /// Magic token for client portal — sent via onboarding pack URL
+  workspacePublicToken String                     @unique @default(uuid())
+  /// If true, the org explicitly allows real name in published proof assets
+  allowPublicName      Boolean                    @default(false)
+  createdAt            DateTime                   @default(now())
+  updatedAt            DateTime                   @default(now())
+  tasks                ImplementationTask[]
+  checklist            IntegrationChecklistItem[]
+  comments             WorkspaceComment[]
+  uploads              WorkspaceUpload[]
+
+  @@index([organizationId, status])
+  @@map("client_workspaces")
+}
+
+model ImplementationTask {
+  id          String             @id @default(uuid())
+  workspaceId String
+  title       String
+  description String
+  ownerRole   String             @default("admin")
+  status      String             @default("todo")
+  phase       String             @default("setup")
+  orderIndex  Int                @default(0)
+  dueAt       DateTime?
+  doneAt      DateTime?
+  createdAt   DateTime           @default(now())
+  workspace   ClientWorkspace    @relation(fields: [workspaceId], references: [id])
+  comments    WorkspaceComment[]
+
+  @@index([workspaceId, status])
+  @@map("implementation_tasks")
+}
+
+model IntegrationChecklistItem {
+  id          String          @id @default(uuid())
+  workspaceId String
+  system      String
+  item        String
+  status      String          @default("pending")
+  notes       String?
+  createdAt   DateTime        @default(now())
+  workspace   ClientWorkspace @relation(fields: [workspaceId], references: [id])
+
+  @@index([workspaceId, system])
+  @@map("integration_checklist_items")
+}
+
+model WorkspaceUpload {
+  id          String          @id @default(uuid())
+  orgId       String
+  workspaceId String
+  /// logo | brand | copy | credentials | other
+  type        String          @default("other")
+  filename    String
+  url         String
+  sizeBytes   Int?
+  createdAt   DateTime        @default(now())
+  workspace   ClientWorkspace @relation(fields: [workspaceId], references: [id])
+
+  @@index([workspaceId])
+  @@index([orgId, type])
+  @@map("workspace_uploads")
+}
+
+model WorkspaceComment {
+  id          String              @id @default(uuid())
+  orgId       String
+  workspaceId String
+  taskId      String?
+  /// client | team
+  authorType  String              @default("client")
+  body        String
+  createdAt   DateTime            @default(now())
+  task        ImplementationTask? @relation(fields: [taskId], references: [id])
+  workspace   ClientWorkspace     @relation(fields: [workspaceId], references: [id])
+
+  @@index([workspaceId])
+  @@index([taskId])
+  @@map("workspace_comments")
+}
+
+model ContentArtifact {
+  id             String    @id @default(uuid())
+  organizationId String
+  assessmentId   String?
+  proposalId     String?
+  type           String
+  version        Int       @default(1)
+  status         String    @default("draft")
+  title          String
+  body           String
+  hook           String?
+  cta            String?
+  hashtags       String?
+  metadata       String?
+  reviewedBy     String?
+  reviewedAt     DateTime?
+  approvedBy     String?
+  approvedAt     DateTime?
+  scheduledFor   DateTime?
+  postedAt       DateTime?
+  roiSnapshot    String?
+  sourceInsight  String?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @default(now())
+
+  @@index([organizationId, type, status])
+  @@index([organizationId, createdAt])
+  @@map("content_artifacts")
+}
+
+model LeadSequence {
+  id             String         @id @default(uuid())
+  organizationId String
+  assessmentId   String         @unique
+  phone          String
+  scoreTier      String
+  status         String         @default("active")
+  currentStage   String         @default("post_click")
+  lastMessageAt  DateTime?
+  nextAllowedAt  DateTime?
+  convertedAt    DateTime?
+  optedOutAt     DateTime?
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @default(now())
+  steps          SequenceStep[]
+
+  @@index([organizationId, status, currentStage])
+  @@index([organizationId, nextAllowedAt])
+  @@map("lead_sequences")
+}
+
+model SequenceStep {
+  id          String       @id @default(uuid())
+  sequenceId  String
+  stage       String
+  channel     String       @default("whatsapp")
+  templateKey String
+  messageBody String
+  scoreTier   String
+  status      String       @default("pending")
+  sentAt      DateTime?
+  deliveredAt DateTime?
+  repliedAt   DateTime?
+  waMessageId String?
+  createdAt   DateTime     @default(now())
+  sequence    LeadSequence @relation(fields: [sequenceId], references: [id])
+
+  @@index([sequenceId, stage])
+  @@index([sequenceId, status])
+  @@map("sequence_steps")
+}
+
+model AuthorityAsset {
+  id             String    @id @default(uuid())
+  organizationId String
+  workspaceId    String?
+  assessmentId   String?
+  proposalId     String?
+  type           String
+  status         String    @default("internal")
+  version        Int       @default(1)
+  title          String
+  headline       String
+  body           String
+  keyMetrics     String
+  modules        String?
+  sector         String?
+  companySize    String?
+  anonLevel      String    @default("full")
+  originalData   String?
+  approvedBy     String?
+  approvedAt     DateTime?
+  publishedAt    DateTime?
+  publishedUrl   String?
+  usageCount     Int       @default(0)
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @default(now())
+
+  @@index([organizationId, type, status])
+  @@index([organizationId, status])
+  @@map("authority_assets")
+}
+
+model ProofStatistic {
+  id             String   @id @default(uuid())
+  organizationId String
+  label          String
+  value          String
+  unit           String?
+  sampleSize     Int      @default(1)
+  sector         String?
+  isPublic       Boolean  @default(false)
+  lastUpdatedAt  DateTime @default(now())
+  createdAt      DateTime @default(now())
+
+  @@index([organizationId, isPublic])
+  @@map("proof_statistics")
+}
+
+model AgentRun {
+  id                String    @id @default(uuid())
+  organizationId    String
+  agentName         String
+  status            String
+  inputHash         String
+  inputJson         String
+  outputJson        String?
+  costUsd           Float     @default(0)
+  tokensIn          Int       @default(0)
+  tokensOut         Int       @default(0)
+  startedAt         DateTime?
+  finishedAt        DateTime?
+  errorMessage      String?
+  relatedEntityType String?
+  relatedEntityId   String?
+
+  @@index([organizationId, agentName, status])
+  @@index([inputHash])
+  @@map("agent_runs")
+}
+
+model ActionQueue {
+  id                String    @id @default(uuid())
+  organizationId    String
+  type              String
+  payloadJson       String
+  priority          String    @default("medium")
+  status            String    @default("pending")
+  approvalRequired  Boolean   @default(false)
+  approvedBy        String?
+  approvedAt        DateTime?
+  executedAt        DateTime?
+  reason            String?
+  relatedEntityType String?
+  relatedEntityId   String?
+  lockedByRunId     String?
+  lockedUntil       DateTime?
+  attempts          Int       @default(0)
+  nextRetryAt       DateTime?
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+
+  @@index([organizationId, status, priority])
+  @@index([lockedUntil])
+  @@map("action_queue")
+}
+
+model PolicyDecision {
+  id             String   @id @default(uuid())
+  organizationId String
+  actionQueueId  String
+  policyName     String
+  decision       String
+  explanation    String
+  createdAt      DateTime @default(now())
+
+  @@index([organizationId, actionQueueId])
+  @@map("policy_decisions")
+}
+
+model MeetingSession {
+  id                  String               @id @default(uuid())
+  organizationId      String
+  assessmentId        String?
+  leadEmail           String
+  startAt             DateTime
+  endAt               DateTime
+  timezone            String
+  status              String
+  revenueScore        Float                @default(0)
+  closeProbability    Float                @default(0)
+  priorityTier        String               @default("warm")
+  meetingUrl          String?
+  externalEventId     String?
+  googleEventId       String?
+  adjustedProbability Float?
+  expectedRevenue     Float?
+  confidenceScore     Float?
+  followUpTone        String?
+  urgencyLevel        Int?
+  proposalStructure   String?
+  recommendedCTA      String?
+  createdAt           DateTime             @default(now())
+  updatedAt           DateTime             @updatedAt
+  performances        MeetingPerformance[]
+  proposalDraftLink   ProposalDraftLink?
+
+  @@index([organizationId, status])
+  @@index([leadEmail])
+  @@index([organizationId, adjustedProbability])
+  @@index([organizationId, expectedRevenue])
+  @@index([organizationId, urgencyLevel])
+  @@map("meeting_sessions")
+}
+
+model ProposalDraftLink {
+  id               String         @id @default(uuid())
+  orgId            String
+  meetingSessionId String         @unique
+  proposalId       String
+  createdAt        DateTime       @default(now())
+  session          MeetingSession @relation(fields: [meetingSessionId], references: [id], onDelete: Cascade)
+
+  @@index([orgId])
+  @@map("proposal_draft_links")
+}
+
+model ReviewRequest {
+  id             String    @id @default(uuid())
+  orgId          String
+  entityType     String
+  entityId       String
+  status         String    @default("pending")
+  reviewerUserId String?
+  notes          String?
+  createdAt      DateTime  @default(now())
+  reviewedAt     DateTime?
+
+  @@index([orgId, status])
+  @@index([orgId, entityType, entityId])
+  @@map("review_requests")
+}
+
+model MeetingPerformance {
+  id             String         @id @default(uuid())
+  organizationId String
+  sessionId      String
+  outcome        String
+  closedValue    Float          @default(0)
+  notes          String?        @default("")
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
+  session        MeetingSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId, sessionId])
+  @@map("meeting_performances")
+}
+
+model CalendarIntegration {
+  id                    String    @id @default(uuid())
+  organizationId        String    @unique
+  provider              String    @default("google")
+  status                String    @default("disconnected")
+  calendarId            String    @default("primary")
+  ownerEmail            String?
+  accessTokenEncrypted  String?
+  refreshTokenEncrypted String?
+  expiryAt              DateTime?
+  lastError             String?
+  createdAt             DateTime  @default(now())
+  updatedAt             DateTime  @updatedAt
+
+  @@index([organizationId, provider])
+  @@map("calendar_integrations")
+}
+
+model WhatsAppMessageLog {
+  id                String    @id @default(uuid())
+  organizationId    String
+  actionQueueItemId String    @unique
+  toPhone           String
+  templateKey       String
+  waMessageId       String?
+  status            String    @default("queued")
+  error             String?
+  sentAt            DateTime?
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+
+  @@index([organizationId, status])
+  @@map("whatsapp_message_logs")
+}
+
+model OrgNotificationChannel {
+  id             String   @id @default(uuid())
+  organizationId String   @unique
+  ownerWhatsApp  String?
+  ownerEmail     String?
+  preferChannel  String   @default("whatsapp")
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@map("org_notification_channels")
+}
+
+model SendWindowStat {
+  id         String   @id @default(uuid())
+  orgId      String
+  hourBucket Int
+  sentCount  Int      @default(0)
+  wonCount   Int      @default(0)
+  updatedAt  DateTime @updatedAt
+
+  @@unique([orgId, hourBucket])
+  @@index([orgId])
+  @@map("send_window_stats")
+}
+
+/// Per-org daily token budget with hard-stop enforcement.
+model AgentBudget {
+  id               String   @id @default(uuid())
+  orgId            String   @unique
+  dailyTokenLimit  Int      @default(20000)
+  dailyTokenUsed   Int      @default(0)
+  dailyCostUsdUsed Float    @default(0.0)
+  /// UTC datetime when dailyTokenUsed resets (midnight UTC-3)
+  resetAt          DateTime @default(now())
+  /// If true: reject agent calls when budget exceeded. If false: allow with a warning.
+  hardStop         Boolean  @default(true)
+  updatedAt        DateTime @updatedAt
+
+  @@map("agent_budgets")
+}
+
+/// LLM output cache — keyed by (orgId, keyHash) to skip redundant generations.
+model AgentCache {
+  id         String   @id @default(uuid())
+  orgId      String
+  keyHash    String
+  agentName  String
+  model      String
+  inputHash  String
+  outputJson String
+  tokensUsed Int      @default(0)
+  costUsd    Float    @default(0.0)
+  createdAt  DateTime @default(now())
+
+  @@unique([orgId, keyHash])
+  @@index([orgId, agentName])
+  @@index([createdAt])
+  @@map("agent_cache")
+}
+
+model Contract {
+  id          String    @id @default(uuid())
+  orgId       String
+  proposalId  String    @unique
+  version     Int       @default(1)
+  /// draft | sent | signed | canceled
+  status      String    @default("draft")
+  publicSlug  String    @unique
+  htmlBody    String
+  pdfUrl      String?
+  signedName  String?
+  signedEmail String?
+  signedAt    DateTime?
+  createdAt   DateTime  @default(now())
+
+  @@index([orgId])
+  @@index([orgId, status])
+  @@map("contracts")
+}
+
+model BillingRecord {
+  id                      String    @id @default(uuid())
+  orgId                   String
+  proposalId              String    @unique
+  stripeCheckoutSessionId String?
+  stripeInvoiceId         String?
+  amountCents             Int
+  currency                String    @default("BRL")
+  /// pending | paid | failed | refunded | stub_paid
+  status                  String    @default("pending")
+  checkoutUrl             String?
+  paidAt                  DateTime?
+  createdAt               DateTime  @default(now())
+  updatedAt               DateTime  @updatedAt
+
+  @@index([orgId])
+  @@index([orgId, status])
+  @@index([stripeCheckoutSessionId])
+  @@map("billing_records")
+}
+
+/// One day entry in a 30-day editorial calendar generated by the Marketing Planner Agent.
+model MarketingPlan {
+  id           String    @id @default(uuid())
+  orgId        String
+  day          Int
+  /// linkedin | instagram
+  platform     String
+  /// authority | case | insight | demonstration | offer | myth_break
+  postType     String
+  topic        String
+  hook         String
+  cta          String
+  priority     Int       @default(2)
+  /// Stored as JSON: { text, hashtags[], shortTitle, postingPack? }
+  contentJson  String?
+  /// draft | reviewed | approved | scheduled | posted | ready_to_post
+  status       String    @default("draft")
+  scheduledFor DateTime?
+  postedAt     DateTime?
+  createdAt    DateTime  @default(now())
+
+  @@unique([orgId, day])
+  @@index([orgId, platform])
+  @@index([orgId, status])
+  @@map("marketing_plans")
+}
+
+/// Per-org social media integration tokens (encrypted at rest).
+model SocialIntegration {
+  id                     String   @id @default(uuid())
+  orgId                  String   @unique
+  /// connected | disconnected
+  linkedinStatus         String   @default("disconnected")
+  /// connected | disconnected
+  instagramStatus        String   @default("disconnected")
+  metaPageId             String?
+  /// AES-256-GCM encrypted — use APP_ENCRYPTION_KEY
+  metaAccessTokenEnc     String?
+  linkedinAccessTokenEnc String?
+  createdAt              DateTime @default(now())
+  updatedAt              DateTime @updatedAt
+
+  @@map("social_integrations")
+}
+
+/// Audit log of every publish attempt per MarketingPlan entry.
+model PublicationLog {
+  id              String    @id @default(uuid())
+  orgId           String
+  marketingPlanId String    @unique
+  platform        String
+  /// ready | scheduled | posted | failed | stub
+  status          String    @default("ready")
+  externalPostId  String?
+  scheduledFor    DateTime?
+  postedAt        DateTime?
+  error           String?
+  createdAt       DateTime  @default(now())
+
+  @@index([orgId, status])
+  @@index([orgId, platform])
+  @@map("publication_logs")
+}
+
+/// 5-format repurpose artifact generated from a MarketingPlan entry.
+model RepurposeArtifact {
+  id                    String   @id @default(uuid())
+  orgId                 String
+  sourceMarketingPlanId String
+  version               Int      @default(1)
+  /// draft | reviewed | approved | scheduled | published
+  status                String   @default("draft")
+  /// JSON: { linkedin_v2, carousel, thread, video, email }
+  formatsJson           String
+  createdAt             DateTime @default(now())
+
+  @@index([orgId, sourceMarketingPlanId])
+  @@index([orgId, status])
+  @@map("repurpose_artifacts")
+}
+
+/// Execution log for each repurpose call (LLM or stub).
+model RepurposeRun {
+  id                    String   @id @default(uuid())
+  orgId                 String
+  sourceMarketingPlanId String
+  tokensUsed            Int      @default(0)
+  costUsd               Float    @default(0.0)
+  /// success | stub | failed
+  status                String   @default("success")
+  error                 String?
+  createdAt             DateTime @default(now())
+
+  @@index([orgId])
+  @@map("repurpose_runs")
+}
+
+/// Proof asset generated from a completed ClientWorkspace.
+/// One of: case_study | linkedin_case | stat_card
+model ProofAsset {
+  id           String   @id @default(uuid())
+  orgId        String
+  workspaceId  String
+  /// case_study | linkedin_case | stat_card
+  type         String
+  /// full | sector_only | size_only | none
+  anonLevel    String   @default("full")
+  /// draft | reviewed | approved | published
+  status       String   @default("draft")
+  title        String
+  body         String
+  /// JSON: { ROI, payback, horas, modulos, diasGoLive }
+  metricsJson  String
+  publishedUrl String?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@unique([orgId, workspaceId, type, anonLevel])
+  @@index([orgId, status])
+  @@index([orgId, type])
+  @@map("proof_assets")
+}
+
+/// Aggregated proof stats snapshot per org (updated on every new ProofAsset approval).
+model ProofStatSnapshot {
+  id                String   @id @default(uuid())
+  orgId             String   @unique
+  totalCases        Int      @default(0)
+  avgPaybackMonths  Float    @default(0)
+  avgMonthlyEconomy Float    @default(0)
+  avgMonthlyRevenue Float    @default(0)
+  avgHoursSaved     Float    @default(0)
+  updatedAt         DateTime @updatedAt
+
+  @@map("proof_stat_snapshots")
+}
+
+/// Executive-level deal packet per assessment — hot lead autopilot.
+model DealPacket {
+  id               String       @id @default(uuid())
+  orgId            String
+  assessmentId     String
+  proposalId       String?
+  /// draft | sent | viewed | meeting_booked | won | lost
+  status           String       @default("draft")
+  /// hot | warm | cold
+  tier             String       @default("cold")
+  /// HTML of the Executive One-Pager (public-safe, no blueprint)
+  execOnePagerHtml String
+  /// Short unique slug for the public URL
+  execSlug         String       @unique
+  createdAt        DateTime     @default(now())
+  updatedAt        DateTime     @updatedAt
+  signals          DealSignal[]
+
+  @@index([orgId, status])
+  @@index([orgId, tier])
+  @@index([orgId, assessmentId])
+  @@map("deal_packets")
+}
+
+/// Engagement signal for a DealPacket (views, CTAs, replies, no-responses).
+model DealSignal {
+  id           String      @id @default(uuid())
+  orgId        String
+  assessmentId String
+  dealPacketId String?
+  /// dossier_viewed | proposal_viewed | proposal_accepted | meeting_scheduled | whatsapp_replied | no_response_72h | whatsapp_sent
+  type         String
+  metadataJson String?
+  createdAt    DateTime    @default(now())
+  dealPacket   DealPacket? @relation(fields: [dealPacketId], references: [id])
+
+  @@index([orgId, assessmentId, createdAt])
+  @@index([orgId, type])
+  @@map("deal_signals")
+}
+
+/// A LinkedIn prospect in the outbound pipeline.
+model Prospect {
+  id               String            @id @default(uuid())
+  orgId            String
+  fullName         String
+  title            String
+  company          String
+  industry         String
+  /// 1-10 | 11-50 | 51-200 | 201-1000 | 1000+
+  companySize      String
+  location         String            @default("")
+  linkedinUrl      String
+  estimatedRevenue String?
+  discoverySource  String            @default("ai_agent")
+  email            String?
+  phone            String?
+  /// new | connected | replied | meeting | lost | do_not_contact
+  status           String            @default("new")
+  /// manual | import | scrape_stub
+  source           String            @default("manual")
+  notes            String?
+  createdAt        DateTime          @default(now())
+  updatedAt        DateTime          @updatedAt
+  messages         OutboundMessage[]
+  sequences        OutboundSequence?
+
+  @@unique([orgId, linkedinUrl])
+  @@index([orgId, status, updatedAt])
+  @@map("prospects")
+}
+
+/// Active outbound sequence for a prospect (one active per prospect).
+model OutboundSequence {
+  id         String            @id @default(uuid())
+  orgId      String
+  prospectId String            @unique
+  /// connect | dm1 | dm2 | dm3 | close | done
+  stage      String            @default("connect")
+  nextAt     DateTime
+  paused     Boolean           @default(false)
+  /// sent | skipped | replied | bounced | unknown
+  lastResult String            @default("unknown")
+  createdAt  DateTime          @default(now())
+  updatedAt  DateTime          @updatedAt
+  messages   OutboundMessage[]
+  prospect   Prospect          @relation(fields: [prospectId], references: [id])
+
+  @@index([orgId, paused, nextAt])
+  @@map("outbound_sequences")
+}
+
+/// Individual message attempt in an outbound sequence.
+model OutboundMessage {
+  id          String           @id @default(uuid())
+  orgId       String
+  prospectId  String
+  sequenceId  String
+  stage       String
+  channel     String           @default("linkedin")
+  templateKey String
+  body        String
+  /// queued | sent | failed | stub
+  status      String           @default("stub")
+  sentAt      DateTime?
+  error       String?
+  createdAt   DateTime         @default(now())
+  sequence    OutboundSequence @relation(fields: [sequenceId], references: [id])
+  prospect    Prospect         @relation(fields: [prospectId], references: [id])
+
+  @@index([orgId, prospectId, createdAt])
+  @@index([orgId, status])
+  @@map("outbound_messages")
+}
+
+/// A detected profit leak instance — one row per org+kind+day (idempotent).
+model ProfitLeak {
+  id                 String   @id @default(uuid())
+  orgId              String
+  /// lead_no_response | stale_followup | no_show | proposal_stale | pipeline_stall | low_reply_rate
+  kind               String
+  /// low | medium | high | critical
+  severity           String
+  title              String
+  description        String
+  estimatedLossCents Int
+  /// JSON: contextual evidence (counts, ids, samples)
+  evidenceJson       String
+  /// open | acknowledged | resolved
+  status             String   @default("open")
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  @@index([orgId, kind, severity, status, createdAt])
+  @@map("profit_leaks")
+}
+
+/// Aggregated snapshot per org per time window — upserted on each scan.
+model ProfitLeakSnapshot {
+  id             String   @id @default(uuid())
+  orgId          String
+  /// today | 7d | 30d
+  window         String
+  totalLossCents Int
+  topLeakKind    String?
+  /// JSON: { kind -> lossCents }
+  breakdownJson  String
+  createdAt      DateTime @default(now())
+
+  @@unique([orgId, window])
+  @@map("profit_leak_snapshots")
+}
+
+/// A generated executive pack (one per org per run, stored forever for history).
+model ExecPack {
+  id          String   @id @default(uuid())
+  orgId       String
+  publicSlug  String   @unique
+  /// draft | ready | archived
+  status      String   @default("draft")
+  /// JSON: ExecPackPayload (all sections)
+  payloadJson String
+  /// Anonymized version toggle state at generation time
+  anonymized  Boolean  @default(false)
+  generatedAt DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([orgId, generatedAt])
+  @@map("exec_packs")
+}
+
+model AppSetting {
+  key       String   @id
+  value     String
+  updatedAt DateTime @default(now())
+
+  @@map("app_settings")
+}
+
+/// Canonical reusable blueprint for a build type.
+model BuildTemplate {
+  id            String   @id @default(uuid())
+  orgId         String
+  /// e.g. "whatsapp_funnel_v1", "clinic_stack_v1"
+  key           String
+  name          String
+  description   String
+  version       Int      @default(1)
+  /// JSON: canonical blueprint definition (deterministic)
+  blueprintJson String
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@unique([orgId, key, version])
+  @@index([orgId, key])
+  @@map("build_templates")
+}
+
+/// A single execution run of the builder.
+model BuildRun {
+  id                String          @id @default(uuid())
+  orgId             String
+  /// optional destination org slug
+  targetOrgSlug     String?
+  /// optional destination workspace
+  targetWorkspaceId String?
+  /// plan_only | prompt_pack | code_patch
+  mode              String
+  /// draft | review | approved | executing | done | failed
+  status            String          @default("draft")
+  /// JSON: assessment/proposal/workspace snapshot used as input
+  inputJson         String
+  /// JSON: generated plan / prompt pack summary
+  outputJson        String?
+  createdAt         DateTime        @default(now())
+  updatedAt         DateTime        @updatedAt
+  artifacts         BuildArtifact[]
+
+  @@index([orgId, status, createdAt])
+  @@map("build_runs")
+}
+
+/// An artifact produced by a BuildRun.
+model BuildArtifact {
+  id         String    @id @default(uuid())
+  orgId      String
+  buildRunId String
+  /// implementation_plan | prompt_pack | diff_plan | checklist
+  type       String
+  version    Int       @default(1)
+  body       String
+  reviewedAt DateTime?
+  approvedAt DateTime?
+  createdAt  DateTime  @default(now())
+  buildRun   BuildRun  @relation(fields: [buildRunId], references: [id])
+
+  @@index([orgId, buildRunId, type, version])
+  @@map("build_artifacts")
+}
+
+/// Event log for the real-time activity stream and KPI engines.
+model SystemEvent {
+  id             String   @id @default(uuid())
+  organizationId String
+  type           String
+  severity       String   @default("info")
+  message        String?
+  entityType     String?
+  entityId       String?
+  payloadJson    String   @default("{}")
+  createdAt      DateTime @default(now())
+  dedupeKey      String?  @unique
+
+  @@index([organizationId, createdAt])
+  @@index([organizationId, type])
+  @@map("system_events")
+}
+
+model StrategicInsight {
+  id                     String   @id @default(uuid())
+  organizationId         String
+  /// sales | marketing | delivery | revenue | operations
+  category               String
+  title                  String
+  description            String
+  /// 1-10 scale denoting the severity or potential ROI of the insight
+  impactScore            Int      @default(5)
+  estimatedRevenueImpact Int?
+  recommendedAction      String
+  /// active | acknowledged | resolved
+  status                 String   @default("active")
+  createdAt              DateTime @default(now())
+  updatedAt              DateTime @updatedAt
+
+  @@index([organizationId, status, category])
+  @@map("strategic_insights")
+}
+
+model GrowthSignal {
+  id             String   @id @default(uuid())
+  organizationId String
+  type           String
+  severity       String   @default("medium")
+  message        String
+  metadataJson   String?
+  actionTaken    Boolean  @default(false)
+  createdAt      DateTime @default(now())
+
+  @@index([organizationId, type])
+  @@map("growth_signals")
+}
+
+model BenchmarkSegment {
+  id          String             @id @default(uuid())
+  orgCount    Int                @default(0)
+  industry    String
+  sizeBand    String
+  plan        String
+  timeWindow  String
+  periodStart DateTime
+  periodEnd   DateTime
+  snapshots   BenchmarkSnapshot?
+
+  @@index([industry, sizeBand, plan, timeWindow, periodEnd])
+  @@map("benchmark_segments")
+}
+
+model BenchmarkSnapshot {
+  id        String           @id @default(uuid())
+  segmentId String           @unique
+  /// JSON: aggregate metrics (proposalAcceptanceRate, meetingShowRate, etc.)
+  metrics   String
+  createdAt DateTime         @default(now())
+  segment   BenchmarkSegment @relation(fields: [segmentId], references: [id])
+
+  @@map("benchmark_snapshots")
+}
+
+model AIChatSession {
+  id              String          @id @default(uuid())
+  organizationId  String
+  createdByUserId String?
+  scope           String          @default("admin")
+  title           String
+  createdAt       DateTime        @default(now())
+  messages        AIChatMessage[]
+  RetrievalLog    RetrievalLog[]
+
+  @@index([organizationId])
+  @@map("ai_chat_sessions")
+}
+
+model AIChatMessage {
+  id             String        @id @default(uuid())
+  sessionId      String
+  organizationId String
+  role           String
+  content        String
+  command        String?
+  meta           String?
+  createdAt      DateTime      @default(now())
+  session        AIChatSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+
+  @@index([sessionId])
+  @@index([organizationId])
+  @@map("ai_chat_messages")
+}
+
+model AIChatMemoryItem {
+  id              String   @id @default(uuid())
+  organizationId  String
+  type            String
+  text            String
+  summary         String?
+  sourceRef       String?
+  evidenceIdsJson String?
+  confidence      Int      @default(5)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @default(now())
+
+  @@index([organizationId, type])
+  @@map("ai_chat_memory_items")
+}
+
+model KnowledgeDocument {
+  id             String           @id @default(uuid())
+  organizationId String
+  /// assessment | proposal | meeting | whatsapp | sales_note | system_event | playbook
+  sourceType     String
+  sourceId       String?
+  title          String
+  rawText        String
+  metadataJson   String?
+  createdAt      DateTime         @default(now())
+  updatedAt      DateTime         @updatedAt
+  chunks         KnowledgeChunk[]
+
+  @@unique([organizationId, sourceType, sourceId])
+  @@index([organizationId, sourceType])
+  @@map("knowledge_documents")
+}
+
+model KnowledgeChunk {
+  id             String            @id @default(uuid())
+  organizationId String
+  documentId     String
+  chunkIndex     Int
+  chunkText      String
+  chunkHash      String            @default("")
+  embedding      String?
+  tokenCount     Int               @default(0)
+  createdAt      DateTime          @default(now())
+  document       KnowledgeDocument @relation(fields: [documentId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId, documentId])
+  @@map("knowledge_chunks")
+}
+
+model RetrievalLog {
+  id             String         @id @default(uuid())
+  organizationId String
+  sessionId      String?
+  queryText      String
+  topK           Int            @default(5)
+  resultsJson    String?
+  createdAt      DateTime       @default(now())
+  session        AIChatSession? @relation(fields: [sessionId], references: [id])
+
+  @@index([organizationId, sessionId])
+  @@map("retrieval_logs")
+}
+
+/// Authorized WhatsApp users with role-based access to the AI Copilot.
+model WhatsAppUser {
+  id             String       @id @default(uuid())
+  /// E.164 phone number (e.g. "5511999998888")
+  phoneNumber    String
+  organizationId String
+  /// ceo   — full access: executive data, all commands
+  /// admin — full access: all commands
+  /// sales — restricted: only own leads, no executive data
+  role           String       @default("sales")
+  /// Optional: link to a platform User account
+  userId         String?
+  /// Display name for logs and alerts
+  name           String?
+  active         Boolean      @default(true)
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@unique([phoneNumber, organizationId])
+  @@index([organizationId])
+  @@map("whatsapp_users")
+}
+
+/// Sales representative (SDR, Closer, or Customer Success)
+model SalesRep {
+  id                   String                @id @default(uuid())
+  organizationId       String
+  /// Optional link to platform user account
+  userId               String?
+  name                 String
+  phone                String?
+  email                String?
+  /// SDR | Closer | CS
+  role                 String                @default("SDR")
+  active               Boolean               @default(true)
+  createdAt            DateTime              @default(now())
+  updatedAt            DateTime              @updatedAt
+  payouts              CommissionPayout[]
+  assignments          LeadAssignment[]
+  performanceSnapshots PerformanceSnapshot[]
+  salesAssignments     SalesAssignment[]
+  user                 User?                 @relation(fields: [userId], references: [id])
+  organization         Organization          @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  targets              SalesTarget[]
+
+  @@index([organizationId])
+  @@map("sales_reps")
+}
+
+/// Assignment of a lead (Assessment) to a SalesRep
+model LeadAssignment {
+  id               String     @id @default(uuid())
+  assessmentId     String
+  salesRepId       String
+  /// User who made the assignment (null = auto-assigned)
+  assignedByUserId String?
+  /// active | reassigned | closed
+  status           String     @default("active")
+  assignedAt       DateTime   @default(now())
+  updatedAt        DateTime   @updatedAt
+  assignedBy       User?      @relation(fields: [assignedByUserId], references: [id])
+  salesRep         SalesRep   @relation(fields: [salesRepId], references: [id], onDelete: Cascade)
+  assessment       Assessment @relation(fields: [assessmentId], references: [id], onDelete: Cascade)
+
+  @@index([salesRepId])
+  @@index([assessmentId])
+  @@map("lead_assignments")
+}
+
+/// Monthly revenue target for a SalesRep
+model SalesTarget {
+  id          String   @id @default(uuid())
+  salesRepId  String
+  /// "YYYY-MM" format, e.g. "2026-03"
+  month       String
+  targetCents Int      @default(0)
+  createdAt   DateTime @default(now())
+  salesRep    SalesRep @relation(fields: [salesRepId], references: [id], onDelete: Cascade)
+
+  @@unique([salesRepId, month])
+  @@map("sales_targets")
+}
+
+/// Commission rule for the organization
+model CommissionRule {
+  id             String             @id @default(uuid())
+  organizationId String
+  /// fixed | percent
+  type           String             @default("percent")
+  /// cents (fixed) or basis points x 100 (percent: 1000 = 10%)
+  value          Int
+  /// proposal | payment
+  appliesTo      String             @default("payment")
+  active         Boolean            @default(true)
+  createdAt      DateTime           @default(now())
+  payouts        CommissionPayout[]
+  organization   Organization       @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId])
+  @@map("commission_rules")
+}
+
+/// Individual commission payout per deal
+model CommissionPayout {
+  id               String          @id @default(uuid())
+  salesRepId       String
+  commissionRuleId String?
+  /// Link to the billing record or proposal
+  billingRecordId  String?
+  amountCents      Int
+  /// pending | paid | cancelled
+  status           String          @default("pending")
+  paidAt           DateTime?
+  createdAt        DateTime        @default(now())
+  rule             CommissionRule? @relation(fields: [commissionRuleId], references: [id])
+  salesRep         SalesRep        @relation(fields: [salesRepId], references: [id], onDelete: Cascade)
+
+  @@index([salesRepId, status])
+  @@map("commission_payouts")
+}
+
+model Contact {
+  id                 String                 @id @default(uuid())
+  organizationId     String
+  phoneNumberE164    String
+  wa_id              String?
+  name               String?
+  tags               String                 @default("[]")
+  lifecycle          String                 @default("lead")
+  lastMessageAt      DateTime?
+  lastInboundAt      DateTime?
+  lastOutboundAt     DateTime?
+  sessionWindowUntil DateTime?
+  optedOutAt         DateTime?
+  optOutReason       String?
+  createdAt          DateTime               @default(now())
+  updatedAt          DateTime               @updatedAt
+  organization       Organization           @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  campaignSends      WhatsAppCampaignSend[]
+  conversations      WhatsAppConversation[]
+  optIn              WhatsAppOptIn?
+
+  @@unique([organizationId, phoneNumberE164])
+  @@map("contacts")
+}
+
+model WhatsAppConversation {
+  id                 String            @id @default(uuid())
+  organizationId     String
+  contactId          String
+  assignedUserId     String?
+  status             String            @default("open")
+  slaDueAt           DateTime?
+  lastMessageAt      DateTime?
+  lastMessagePreview String?
+  unreadCount        Int               @default(0)
+  createdAt          DateTime          @default(now())
+  updatedAt          DateTime          @updatedAt
+  user               User?             @relation(fields: [assignedUserId], references: [id])
+  contact            Contact           @relation(fields: [contactId], references: [id], onDelete: Cascade)
+  organization       Organization      @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  messages           WhatsAppMessage[]
+
+  @@unique([organizationId, contactId])
+  @@index([organizationId, status, slaDueAt])
+  @@map("whatsapp_conversations")
+}
+
+model WhatsAppMessage {
+  id                String               @id @default(uuid())
+  conversationId    String
+  messageId         String?              @unique
+  direction         String
+  type              String               @default("text")
+  text              String?
+  mediaUrl          String?
+  status            String               @default("sent")
+  replyToId         String?
+  errorJson         String?
+  sentAt            DateTime?
+  deliveredAt       DateTime?
+  readAt            DateTime?
+  failedAt          DateTime?
+  metaStatusPayload String?
+  createdAt         DateTime             @default(now())
+  conversation      WhatsAppConversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+
+  @@index([conversationId, createdAt])
+  @@map("whatsapp_messages")
+}
+
+model WhatsAppOptIn {
+  id        String   @id @default(uuid())
+  contactId String   @unique
+  source    String
+  consentAt DateTime @default(now())
+  proofJson String?
+  contact   Contact  @relation(fields: [contactId], references: [id], onDelete: Cascade)
+
+  @@index([contactId])
+  @@map("whatsapp_opt_ins")
+}
+
+model WhatsAppTemplate {
+  id             String             @id @default(uuid())
+  organizationId String
+  name           String
+  category       String
+  language       String             @default("pt_BR")
+  status         String             @default("pending")
+  bodyJson       String
+  createdAt      DateTime           @default(now())
+  updatedAt      DateTime           @updatedAt
+  campaigns      WhatsAppCampaign[]
+  organization   Organization       @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@unique([organizationId, name, language])
+  @@map("whatsapp_templates")
+}
+
+model WhatsAppCampaign {
+  id             String                 @id @default(uuid())
+  organizationId String
+  templateId     String
+  name           String
+  segmentQuery   String
+  scheduleAt     DateTime?
+  throttlePolicy String
+  stats          String                 @default("{}")
+  status         String                 @default("draft")
+  createdAt      DateTime               @default(now())
+  updatedAt      DateTime               @updatedAt
+  sends          WhatsAppCampaignSend[]
+  template       WhatsAppTemplate       @relation(fields: [templateId], references: [id])
+  organization   Organization           @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId, status])
+  @@map("whatsapp_campaigns")
+}
+
+model WhatsAppCampaignSend {
+  id         String           @id @default(uuid())
+  campaignId String
+  contactId  String
+  status     String           @default("pending")
+  errorCode  String?
+  sentAt     DateTime?
+  contact    Contact          @relation(fields: [contactId], references: [id])
+  campaign   WhatsAppCampaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+
+  @@unique([campaignId, contactId])
+  @@map("whatsapp_campaign_sends")
+}
+
+model StrategyRecommendation {
+  id             String   @id @default(uuid())
+  organizationId String
+  type           String
+  title          String
+  summary        String
+  evidenceJson   String
+  impactScore    Int
+  effortScore    Int
+  roiCents       Int?
+  status         String   @default("active")
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@index([organizationId, status, impactScore])
+  @@map("strategy_recommendations")
+}
+
+model ExperimentPlan {
+  id             String   @id @default(uuid())
+  organizationId String
+  hypothesis     String
+  metricKey      String
+  baselineValue  Float?
+  targetValue    Float?
+  planJson       String
+  status         String   @default("draft")
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@index([organizationId, status])
+  @@map("experiment_plans")
+}
+
+model Offer {
+  id             String       @id @default(uuid())
+  organizationId String
+  name           String
+  niche          String?
+  status         String       @default("draft")
+  priceCents     Int
+  currency       String       @default("BRL")
+  /// JSON: promise, deliverables, timeline, guarantees, exclusions
+  offerJson      String
+  /// JSON: variables + defaults
+  roiModelJson   String
+  publishedSlug  String?      @unique
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+  assets         OfferAsset[]
+
+  @@index([organizationId, status])
+  @@map("offers")
+}
+
+model OfferAsset {
+  id        String   @id @default(uuid())
+  offerId   String
+  /// one_pager_html | proposal_template | contract_template | checkout_config
+  type      String
+  content   String
+  createdAt DateTime @default(now())
+  offer     Offer    @relation(fields: [offerId], references: [id], onDelete: Cascade)
+
+  @@index([offerId, type])
+  @@map("offer_assets")
+}
+
+model SalesAssignment {
+  id             String   @id @default(uuid())
+  organizationId String
+  salesRepId     String
+  entityType     String
+  entityId       String
+  createdAt      DateTime @default(now())
+  salesRep       SalesRep @relation(fields: [salesRepId], references: [id], onDelete: Cascade)
+
+  @@unique([organizationId, entityType, entityId])
+  @@map("sales_assignments")
+}
+
+model PerformanceSnapshot {
+  id             String    @id @default(uuid())
+  organizationId String
+  salesRepId     String?
+  window         String    @default("7d")
+  /// JSON: replyTimeAvg, meetings, showRate, proposalsSent, wins, revenueCents
+  statsJson      String
+  createdAt      DateTime  @default(now())
+  salesRep       SalesRep? @relation(fields: [salesRepId], references: [id])
+
+  @@index([organizationId, window])
+  @@map("performance_snapshots")
+}
+
+model Playbook {
+  id             String        @id @default(uuid())
+  organizationId String
+  name           String
+  description    String
+  status         String        @default("draft")
+  trigger        String        @default("manual")
+  approvalMode   String        @default("requires_admin")
+  policyJson     String
+  stepsJson      String
+  tags           String
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+  runs           PlaybookRun[]
+
+  @@index([organizationId, status])
+  @@map("playbooks")
+}
+
+model PlaybookRun {
+  id               String    @id @default(uuid())
+  playbookId       String
+  organizationId   String
+  status           String    @default("queued")
+  actorUserId      String?
+  dryRun           Boolean   @default(false)
+  inputJson        String?
+  resultJson       String?
+  errorJson        String?
+  approvedByUserId String?
+  approvedAt       DateTime?
+  startedAt        DateTime?
+  finishedAt       DateTime?
+  createdAt        DateTime  @default(now())
+  playbook         Playbook  @relation(fields: [playbookId], references: [id])
+
+  @@index([organizationId, status, createdAt])
+  @@map("playbook_runs")
+}
+
+model PlaybookApproval {
+  id                String    @id @default(uuid())
+  organizationId    String
+  playbookRunId     String    @unique
+  requestedByUserId String?
+  requiredRole      String
+  status            String    @default("pending")
+  note              String?
+  createdAt         DateTime  @default(now())
+  decidedAt         DateTime?
+
+  @@index([organizationId, status])
+  @@map("playbook_approvals")
+}
