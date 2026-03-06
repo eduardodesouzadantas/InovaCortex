@@ -14,8 +14,8 @@ export interface RepurposeAgentInput {
 
 registerAgent(
     "repurpose_engine",
-    async (input: RepurposeAgentInput) => {
-        logger.info("[RepurposeAgent] Starting", input);
+    async (input: RepurposeAgentInput, _ctx: any) => {
+        logger.info("[RepurposeAgent] Starting", { ...input });
         return repurposeFromPlan(input.orgId, input.marketingPlanId);
     },
     {

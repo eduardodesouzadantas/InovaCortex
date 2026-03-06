@@ -64,19 +64,20 @@ export async function discoverHighTicketLeads(orgId: string) {
     for (const match of prospectsData) {
         // Avoid exact company duplicates
         const existing = await prisma.prospect.findFirst({
-            where: { organizationId: orgId, companyName: match.companyName }
+            where: { orgId, company: match.companyName }
         });
 
         if (!existing) {
             const prospect = await prisma.prospect.create({
                 data: {
-                    organizationId: orgId,
-                    companyName: match.companyName,
+                    orgId,
+                    company: match.companyName,
                     industry: match.industry,
                     companySize: match.companySize,
                     estimatedRevenue: match.estimatedRevenue,
                     linkedinUrl: match.linkedinUrl,
-                    contactName: match.contactName,
+                    fullName: match.contactName,
+                    title: "Executive",
                     status: 'discovered',
                     discoverySource: 'ai_agent'
                 }

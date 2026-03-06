@@ -26,9 +26,9 @@ export async function POST(
     await prisma.systemEvent.create({
         data: {
             type: "meeting_scheduled",
-            description: `Lead demonstrou interesse na oferta: ${offer.name}`,
+            message: `Lead demonstrou interesse na oferta: ${offer.name}`,
             organizationId: offer.organizationId,
-            metadata: JSON.stringify({ offerId: offer.id, source: "one_pager" })
+            payloadJson: JSON.stringify({ offerId: offer.id, source: "one_pager" })
         }
     });
 

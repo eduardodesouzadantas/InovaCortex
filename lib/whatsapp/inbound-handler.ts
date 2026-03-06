@@ -18,8 +18,8 @@ export interface InboundMessage {
 export function validateMetaSignature(rawBody: string, signature: string | null): boolean {
     const secret = process.env.META_APP_SECRET;
     if (!secret) {
-        logger.warn("META_APP_SECRET not configured — skipping signature check");
-        return true; // Permissive in dev; enforce in prod
+        logger.error("CRITICAL: META_APP_SECRET not configured. Rejecting webhook to prevent spoofing.");
+        return false;
     }
 
     if (!signature?.startsWith("sha256=")) return false;

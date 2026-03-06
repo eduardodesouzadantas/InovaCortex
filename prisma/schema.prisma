@@ -3,8 +3,8 @@ generator client {
 }
 
 datasource db {
-  provider = "sqlite"
-  url      = "file:./dev.db"
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
 }
 
 model Organization {
@@ -182,13 +182,13 @@ model MessageLog {
 }
 
 model AuditEvent {
-  id             String     @id @default(uuid())
-  assessmentId   String
+  id             String      @id @default(uuid())
+  assessmentId   String?
   action         String
   details        String?
-  organizationId String     @default("default-org-id")
-  createdAt      DateTime   @default(now())
-  assessment     Assessment @relation(fields: [assessmentId], references: [id])
+  organizationId String      @default("default-org-id")
+  createdAt      DateTime    @default(now())
+  assessment     Assessment? @relation(fields: [assessmentId], references: [id])
 
   @@map("audit_events")
 }
@@ -1687,3 +1687,5 @@ model PlaybookApproval {
   @@index([organizationId, status])
   @@map("playbook_approvals")
 }
+
+

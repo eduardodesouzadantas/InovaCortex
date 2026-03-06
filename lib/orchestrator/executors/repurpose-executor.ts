@@ -17,7 +17,7 @@ export interface RepurposeExecutorContext {
 export async function executeRepurposeMarketingPlan(
     ctx: RepurposeExecutorContext,
 ): Promise<{ success: boolean; artifactId?: string; stub?: boolean }> {
-    logger.info("[RepurposeExecutor] Starting", ctx);
+    logger.info("[RepurposeExecutor] Starting", { ...ctx });
 
     try {
         const result = await repurposeFromPlan(ctx.orgId, ctx.marketingPlanId);

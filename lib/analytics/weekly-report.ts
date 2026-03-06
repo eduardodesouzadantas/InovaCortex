@@ -25,11 +25,11 @@ export async function generateWeeklyExecutiveReport(orgId: string) {
     });
 
     const weeklyProposals = await prisma.proposal.findMany({
-        where: { orgId, createdAt: { gte: sevenDaysAgo } }
+        where: { organizationId: orgId, createdAt: { gte: sevenDaysAgo } }
     });
 
     const accepted = weeklyProposals.filter(p => p.status === 'accepted');
-    const totalRevenueCents = accepted.reduce((acc, p) => acc + p.totalValueCents, 0);
+    const totalRevenueCents = accepted.reduce((acc, p) => acc + (parseInt(p.pricingEstimate || "0") * 100), 0);
 
     // Get active Strategic Insights for context
     const activeInsights = await prisma.strategicInsight.findMany({

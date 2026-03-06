@@ -319,15 +319,26 @@ export async function GET(
 
     await browser.close();
 
-    const safeCompany = assessment.company.replace(/[^a-z0-9]/gi, "_");
-    const pdfBytes = pdfBuffer instanceof Uint8Array ? pdfBuffer : new Uint8Array(pdfBuffer);
+    // --- VERCEL SERVERLESS COMPATIBILITY CHECK ---
+    // Puppeteer exceeds Vercel limits (50MB function size, 10s-15s timeouts).
+    // In production, this should be offloaded to an AWS Lambda or dedicated service.
+    if (process.env.VERCEL === "1") {
+      return new NextResponse(
+        "PDF generation is temporarily disabled in Vercel Serverless environment due to Chromium binary size limits. Please implement a dedicated background worker or use @sparticuz/chromium.",
+        { status: 501 }
+      );
+    }
 
-    return new NextResponse(pdfBytes, {
+    const safeCompany = assessment.company.replace(/[^a-z0-9]/gi, "_");
+
+    // Wrap in a Blob to satisfy Next.js BodyInit strict typing
+    const blob = new Blob([pdfBuffer as unknown as ArrayBuffer], { type: "application/pdf" });
+
+    return new NextResponse(blob, {
       status: 200,
       headers: {
         "Content-Type": "application/pdf",
         "Content-Disposition": `attachment; filename="InovaCortex_Dossie_${safeCompany}.pdf"`,
-        "Content-Length": String(pdfBytes.byteLength),
       },
     });
   } catch (error) {

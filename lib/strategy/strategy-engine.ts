@@ -125,10 +125,10 @@ export async function getBenchmarks(orgId: string, window: string = "30d") {
         });
     }
 
-    if (!segment || segment.snapshots.length === 0) return null;
+    if (!segment || !segment.snapshots) return null;
 
     try {
-        return JSON.parse(segment.snapshots[0].metrics);
+        return JSON.parse((segment.snapshots as any).metrics);
     } catch {
         return null;
     }

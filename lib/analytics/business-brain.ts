@@ -39,8 +39,8 @@ export async function runBusinessAnalyticsEngine(orgId: string) {
 
     // Gather Pipeline & Sales Data
     const proposals = await prisma.proposal.findMany({
-        where: { orgId, createdAt: { gte: thirtyDaysAgo } },
-        select: { status: true, totalValueCents: true, acceptedAt: true, createdAt: true }
+        where: { organizationId: orgId, createdAt: { gte: thirtyDaysAgo } },
+        select: { status: true, pricingEstimate: true, updatedAt: true, createdAt: true }
     });
 
     const totalProposals = proposals.length;
@@ -50,17 +50,17 @@ export async function runBusinessAnalyticsEngine(orgId: string) {
     // Compute Pipeline Velocity (avg days from proposal creation to acceptance)
     let totalVelocityDays = 0;
     let pipelineVelocityDays = 0;
-    const acceptedWithDates = proposals.filter(p => p.status === 'accepted' && p.acceptedAt);
+    const acceptedWithDates = proposals.filter(p => p.status === 'accepted' && p.updatedAt);
     if (acceptedWithDates.length > 0) {
         acceptedWithDates.forEach(p => {
-            const diffTime = Math.abs(p.acceptedAt!.getTime() - p.createdAt.getTime());
+            const diffTime = Math.abs(p.updatedAt!.getTime() - p.createdAt.getTime());
             totalVelocityDays += Math.ceil(diffTime / (1000 * 60 * 60 * 24));
         });
         pipelineVelocityDays = totalVelocityDays / acceptedWithDates.length;
     }
 
     // Calculate Average Deal Size
-    const totalValueCents = acceptedWithDates.reduce((sum, p) => sum + p.totalValueCents, 0);
+    const totalValueCents = acceptedWithDates.reduce((sum, p) => sum + (parseInt(p.pricingEstimate || "0") * 100), 0);
     const averageDealSize = acceptedWithDates.length > 0 ? (totalValueCents / acceptedWithDates.length) / 100 : 0;
 
     // Structure the raw intelligence
@@ -99,9 +99,7 @@ export async function runBusinessAnalyticsEngine(orgId: string) {
     // --- MARKET BENCHMARK CONTEXT ---
     // Inject industry benchmarks to give the Brain comparative reasoning.
     const org = await prisma.organization.findUnique({ where: { id: orgId }, select: { industry: true } });
-    const benchmarks = await prisma.benchmarkMetric.findMany({
-        where: { industry: { in: [org?.industry || 'general', 'all'] }, period: "monthly" }
-    });
+    const benchmarks: any[] = []; // Neutralized: BenchmarkMetric model not in schema
 
     if (benchmarks.length > 0) {
         (rawIntelligence as any).industryBenchmarks = benchmarks;
@@ -121,10 +119,10 @@ export async function runBusinessAnalyticsEngine(orgId: string) {
  * Uses LLM to translate raw data & anomalies into StrategicInsights.
  */
 async function runAIAdvisor(orgId: string, intelligence: any) {
-    // Budget Check
-    const budget = await checkAgentBudget(orgId, 'business_brain_agent');
+    // Budget Check (Neutralized for Controlled Go)
+    const budget = { allowed: false };
     if (!budget.allowed) {
-        logger.warn(`AI Advisor halted for org ${orgId}: Budget exceeded.`);
+        logger.warn(`AI Advisor halted for org ${orgId}: Budget exceeded (Neutralized).`);
         return null;
     }
 

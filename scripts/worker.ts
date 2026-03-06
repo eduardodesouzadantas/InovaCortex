@@ -12,7 +12,7 @@ const POLL_INTERVAL_MS = 10000; // Poll every 10 seconds
 let isRunning = true;
 
 async function startWorker() {
-    logger.info({ action: 'WorkerStarted', message: 'ActionQueue background worker initialized' });
+    logger.info('ActionQueue background worker initialized', { action: 'WorkerStarted' });
 
     while (isRunning) {
         try {
@@ -23,7 +23,7 @@ async function startWorker() {
                 await Orchestrator.processQueue(org.id);
             }
         } catch (error: any) {
-            logger.error({ action: 'WorkerCycleFailed', error: error.message });
+            logger.error('Worker cycle failed', { action: 'WorkerCycleFailed', error: error.message });
         }
 
         // Wait before polling again, but break early if shutting down
@@ -33,13 +33,13 @@ async function startWorker() {
         }
     }
 
-    logger.info({ action: 'WorkerShutdown', message: 'Worker exited cleanly' });
+    logger.info('Worker exited cleanly', { action: 'WorkerShutdown' });
     process.exit(0);
 }
 
 // Graceful shutdown handlers to ensure locks aren't permanently orphaned if the process dies
 function handleShutdown(signal: string) {
-    logger.info({ action: 'WorkerShutdownSignal', signal, message: 'Initiating graceful shutdown...' });
+    logger.info('Initiating graceful shutdown...', { action: 'WorkerShutdownSignal', signal });
     isRunning = false;
 }
 

@@ -24,7 +24,7 @@ export interface DealflowExecutorContext {
 export async function executeGenerateDealPacket(
     ctx: DealflowExecutorContext,
 ): Promise<{ success: boolean; dealPacketId?: string; execSlug?: string; tier?: string; stub?: boolean }> {
-    logger.info("[DealflowExecutor] Starting", ctx);
+    logger.info("[DealflowExecutor] Starting", { ...ctx });
 
     try {
         const { prisma } = await import("@/lib/prisma");

@@ -18,7 +18,10 @@ const COOKIE_NAME = "session";
 const SESSION_TTL = 60 * 60 * 24 * 7; // 7 days in seconds
 
 function getJwtSecret(): Uint8Array {
-    const key = process.env.APP_ENCRYPTION_KEY ?? "inovacortex-dev-secret-please-change-this-in-prod";
+    const key = process.env.APP_ENCRYPTION_KEY;
+    if (!key) {
+        throw new Error("CRITICAL: APP_ENCRYPTION_KEY environment variable is missing.");
+    }
     return new TextEncoder().encode(key);
 }
 

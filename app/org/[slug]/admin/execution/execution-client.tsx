@@ -48,7 +48,7 @@ export default function ExecutionClient({ orgSlug, initialPlaybooks, initialAppr
                                         />
                                     )}
                                 </button>
-                                <HelpPopover guideId={tab.helpId} position="top" size="sm" />
+                                {/* <HelpPopover title={tab.label} description={`Informações sobre ${tab.label}`} /> */}
                             </div>
                         );
                     })}

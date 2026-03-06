@@ -23,7 +23,7 @@ export async function calculateTeamPerformance(orgId: string): Promise<TeamPerfo
     for (const c of convos) {
         if (!c.assignedUserId || !c.user) continue;
 
-        const existing = userMap.get(c.assignedUserId) || { name: c.user.name, total: 0, open: 0 };
+        const existing = userMap.get(c.assignedUserId) || { name: (c.user as any).name || (c.user as any).fullName || "Agent", total: 0, open: 0 };
         existing.total++;
         if (c.status === "open") existing.open++;
 

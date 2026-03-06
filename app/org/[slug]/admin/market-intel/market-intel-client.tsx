@@ -106,8 +106,8 @@ export function MarketIntelClient({ orgSlug, companyMetrics, orgData }: MarketIn
                                 key={win}
                                 onClick={() => setWindowFilter(win as any)}
                                 className={`px-6 py-2 rounded-xl text-sm font-bold transition-all ${windowFilter === win
-                                        ? 'bg-indigo-500 text-white shadow-[0_0_20px_rgba(99,102,241,0.3)]'
-                                        : 'text-zinc-400 hover:text-white'
+                                    ? 'bg-indigo-500 text-white shadow-[0_0_20px_rgba(99,102,241,0.3)]'
+                                    : 'text-zinc-400 hover:text-white'
                                     }`}
                             >
                                 {win}
@@ -215,7 +215,7 @@ export function MarketIntelClient({ orgSlug, companyMetrics, orgData }: MarketIn
                                                         <RechartsTooltip
                                                             contentStyle={{ backgroundColor: '#18181b', borderColor: '#27272a', borderRadius: '12px', fontSize: '12px' }}
                                                             itemStyle={{ color: '#fff' }}
-                                                            formatter={(val: number) => formatValue(key, val)}
+                                                            formatter={(val: any) => formatValue(key, val || 0)}
                                                         />
                                                         <Area type="monotone" dataKey="market" stroke={goodPerformance ? "#10b981" : "#8b5cf6"} fillOpacity={1} fill={`url(#grad-${key})`} />
                                                     </AreaChart>

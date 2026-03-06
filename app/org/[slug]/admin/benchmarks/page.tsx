@@ -1,7 +1,7 @@
 import { prisma } from "@/lib/prisma";
 import { BenchmarksClient } from "./benchmarks-client";
 
-export default async function AdminBenchmarksPage({ params }: { params: { slug: string } }) {
+export default async function AdminBenchmarksPage({ params }: { params: Promise<{ slug: string }> }) {
     const { slug } = await params;
 
     const org = await prisma.organization.findUnique({
@@ -10,13 +10,13 @@ export default async function AdminBenchmarksPage({ params }: { params: { slug: 
 
     if (!org) return <div>Org not found</div>;
 
-    // Fetch the latest generated benchmarks for the org's industry Or 'all'
-    const benchmarks = await prisma.benchmarkMetric.findMany({
-        where: {
-            industry: { in: ['general', 'all'] },
-            period: "monthly"
-        }
-    });
+    // BenchmarkMetric model not yet migrated to Postgres — return empty list for now
+    // TODO: Add BenchmarkMetric model to schema and re-enable this query
+    const benchmarks: {
+        id: string; industry: string; period: string;
+        metric: string; label?: string; value: number; sampleSize: number;
+        unit?: string | null; percentile75?: number | null; percentile25?: number | null;
+    }[] = [];
 
     // We also need the org's current local metrics to compare against the benchmark
     // In a real scenario, this would be computed on the fly or fetched from a materialized view

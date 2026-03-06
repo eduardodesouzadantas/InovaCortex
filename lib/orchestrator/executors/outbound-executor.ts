@@ -17,7 +17,7 @@ export interface OutboundExecutorContext {
 export async function executeOutboundSendNext(
     ctx: OutboundExecutorContext,
 ): Promise<{ success: boolean; sent?: boolean; stage?: string; messageId?: string }> {
-    logger.info("[OutboundExecutor] Starting", ctx);
+    logger.info("[OutboundExecutor] Starting", { ...ctx });
 
     try {
         const result = await sendNextOutboundStep(ctx.orgId, ctx.sequenceId);

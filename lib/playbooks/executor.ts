@@ -15,7 +15,7 @@ export async function runPlaybook(ctx: PlaybookContext, args: {
 
     const playbook = await ctx.db.playbook.findFirst({ where: { id: playbookId, organizationId: orgId } }).catch(() => null);
 
-    const approvalMode = playbook?.approvalMode ?? def.defaultApprovalMode;
+    const approvalMode = (playbook?.approvalMode ?? def.defaultApprovalMode) as "auto" | "requires_admin" | "requires_owner";
 
     let policy = def.defaultPolicy;
     if (playbook?.policyJson) {

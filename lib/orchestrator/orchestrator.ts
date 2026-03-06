@@ -53,11 +53,7 @@ export class Orchestrator {
             data: {
                 organizationId: ctx.orgId,
                 action: "actionQueued",
-                userId: ctx.userId || "system",
-                resourceType: "action_queue",
-                resourceId: q.id,
                 details: `Enqueued ${action.type}`,
-                ipAddress: "system",
                 assessmentId: action.relatedEntityId || "none"
             }
         });
@@ -140,7 +136,7 @@ export class Orchestrator {
 
                 // Audit
                 await prisma.auditEvent.create({
-                    data: { organizationId: orgId, action: "sentToReview", userId: "system", resourceType: "action_queue", resourceId: item.id, ipAddress: "system", assessmentId: item.relatedEntityId || "none" }
+                    data: { organizationId: orgId, action: "sentToReview", assessmentId: item.relatedEntityId || "none" }
                 });
                 continue;
             }
@@ -210,7 +206,7 @@ export class Orchestrator {
                     data: { status: "executed", executedAt: new Date(), lockedByRunId: null, lockedUntil: null }
                 });
                 await prisma.auditEvent.create({
-                    data: { organizationId: orgId, action: "executed", userId: approvedByUserId || "system", resourceType: "action_queue", resourceId: queueId, ipAddress: "system", assessmentId: item.relatedEntityId || "none" }
+                    data: { organizationId: orgId, action: "executed", assessmentId: item.relatedEntityId || "none" }
                 });
             } else {
                 await this.markItemRejected(queueId, `Agent run failed: ${result.error}`);
@@ -267,7 +263,7 @@ export class Orchestrator {
             data: { status: "rejected", reason, lockedByRunId: null, lockedUntil: null }
         });
         await prisma.auditEvent.create({
-            data: { organizationId: item.organizationId, action: "rejected", userId: "system", resourceType: "action_queue", resourceId: id, details: reason, ipAddress: "system", assessmentId: item.relatedEntityId || "none" }
+            data: { organizationId: item.organizationId, action: "rejected", details: reason, assessmentId: item.relatedEntityId || "none" }
         });
     }
 
