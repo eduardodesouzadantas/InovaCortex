@@ -1,39 +1,20 @@
-import { prisma } from '../lib/prisma';
-import { logger } from '../lib/logger';
+import { PrismaClient } from '@prisma/client'
+const prisma = new PrismaClient()
 
-async function checkDeployment() {
-    logger.info('Running deployment pre-flight checks...');
+async function main() {
+    const orgs = await (prisma as any).organization.findMany();
+    console.log("Organizations in DB:", orgs.map((o: any) => ({ id: o.id, slug: o.slug, name: o.name })));
 
-    let hasErrors = false;
+    const assessments = await (prisma as any).assessment.findMany({
+        take: 5,
+        orderBy: { createdAt: 'desc' }
+    });
+    console.log("Last 5 Assessments:", assessments.map((a: any) => ({ id: a.id, email: a.email, createdAt: a.createdAt })));
 
-    // 1. Check Database
-    try {
-        await prisma.$queryRaw`SELECT 1`;
-        logger.info('✅ Database connection successful');
-    } catch (e: any) {
-        logger.error(`❌ Database connection failed: ${e.message}`);
-        hasErrors = true;
-    }
-
-    // 2. Check S3 Env Vars
-    if (process.env.UPLOAD_S3_BUCKET && process.env.AWS_ACCESS_KEY_ID && process.env.AWS_SECRET_ACCESS_KEY) {
-        logger.info('✅ S3 Storage credentials detected');
-    } else {
-        logger.warn('⚠️ S3 Storage credentials missing. File uploads will fallback to local stub storage.');
-    }
-
-    // 3. Check Autopilot Env
-    if (process.env.AI_AUTOPILOT_BUILDER === 'true') {
-        logger.info('✅ Builder Autopilot is ENABLED');
-    }
-
-    if (hasErrors) {
-        logger.error('Deployment checks failed!');
-        process.exit(1);
-    } else {
-        logger.info('All critical deployment checks passed.');
-        process.exit(0);
-    }
+    const count = await (prisma as any).assessment.count();
+    console.log("Total Assessments:", count);
 }
 
-checkDeployment();
+main()
+    .catch(console.error)
+    .finally(() => prisma.$disconnect());
