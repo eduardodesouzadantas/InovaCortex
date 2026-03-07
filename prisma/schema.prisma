@@ -80,6 +80,7 @@ model User {
   organization                  Organization           @relation(fields: [organizationId], references: [id])
   assignedWhatsAppConversations WhatsAppConversation[]
 
+  @@index([organizationId])
   @@map("users")
 }
 
@@ -116,6 +117,8 @@ model Assessment {
   proposals           Proposal[]
   roiProjection       RoiProjection?
 
+  @@index([organizationId, status])
+  @@index([email])
   @@map("assessments")
 }
 
@@ -135,6 +138,8 @@ model Proposal {
   updatedAt        DateTime   @updatedAt
   assessment       Assessment @relation(fields: [assessmentId], references: [id])
 
+  @@index([assessmentId])
+  @@index([organizationId, status])
   @@map("proposals")
 }
 
@@ -178,6 +183,7 @@ model MessageLog {
   createdAt       DateTime   @default(now())
   assessment      Assessment @relation(fields: [assessmentId], references: [id])
 
+  @@index([assessmentId])
   @@map("message_logs")
 }
 
@@ -190,6 +196,8 @@ model AuditEvent {
   createdAt      DateTime    @default(now())
   assessment     Assessment? @relation(fields: [assessmentId], references: [id])
 
+  @@index([assessmentId])
+  @@index([organizationId, createdAt])
   @@map("audit_events")
 }
 
@@ -230,6 +238,8 @@ model AIInvocation {
   errorMessage     String?
   createdAt        DateTime @default(now())
 
+  @@index([assessmentId])
+  @@index([organizationId, status])
   @@map("ai_invocations")
 }
 
@@ -1687,5 +1697,3 @@ model PlaybookApproval {
   @@index([organizationId, status])
   @@map("playbook_approvals")
 }
-
-
