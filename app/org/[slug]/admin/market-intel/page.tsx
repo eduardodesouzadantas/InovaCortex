@@ -1,16 +1,27 @@
+import { redirect } from "next/navigation";
 import { prisma } from "@/lib/prisma";
+import { requireOrgContext } from "@/lib/auth/org-context";
+import { assertRole } from "@/lib/auth/rbac";
+import { deriveSizeBand, normalizeIndustry, normalizePlan } from "@/lib/market-intel/segment-utils";
 import { MarketIntelClient } from "./market-intel-client";
 
 export default async function AdminMarketIntelPage({ params }: { params: { slug: string } }) {
-    const { slug } = await params;
+    let ctx;
+    try {
+        ctx = await requireOrgContext(params.slug);
+        assertRole(ctx.role, "admin");
+    } catch {
+        redirect(`/org/${params.slug}/admin/login`);
+    }
 
     const org = await prisma.organization.findUnique({
-        where: { slug }
+        where: { id: ctx.orgId },
+        select: { id: true, industry: true, maxUsers: true, plan: true }
     });
 
-    if (!org) return <div>Organização não encontrada</div>;
+    if (!org) return <div>Organizacao nao encontrada</div>;
 
-    // Calculate baseline local metrics (Last 30 days as default view)
+    // Calculate baseline local metrics (last 30 days)
     const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
     const proposals = await prisma.proposal.findMany({
         where: { organizationId: org.id, createdAt: { gte: thirtyDaysAgo } },
@@ -22,7 +33,7 @@ export default async function AdminMarketIntelPage({ params }: { params: { slug:
     let localPipelineVelocity = 0;
 
     if (proposals.length > 0) {
-        const accepted = proposals.filter(p => p.status === 'accepted');
+        const accepted = proposals.filter(p => p.status === "accepted");
         localAcceptanceRate = (accepted.length / proposals.length) * 100;
 
         if (accepted.length > 0) {
@@ -30,7 +41,9 @@ export default async function AdminMarketIntelPage({ params }: { params: { slug:
                 try {
                     const pe = JSON.parse(p.pricingEstimate);
                     return acc + (pe.min || 0);
-                } catch { return acc; }
+                } catch {
+                    return acc;
+                }
             }, 0) / accepted.length / 100;
 
             const velocitySum = accepted.reduce((acc, p) => {
@@ -42,10 +55,10 @@ export default async function AdminMarketIntelPage({ params }: { params: { slug:
     }
 
     const scheduledMeetings = await prisma.systemEvent.count({
-        where: { organizationId: org.id, type: 'meeting_scheduled', createdAt: { gte: thirtyDaysAgo } }
+        where: { organizationId: org.id, type: "meeting_scheduled", createdAt: { gte: thirtyDaysAgo } }
     });
     const noShows = await prisma.systemEvent.count({
-        where: { organizationId: org.id, type: 'meeting_no_show', createdAt: { gte: thirtyDaysAgo } }
+        where: { organizationId: org.id, type: "meeting_no_show", createdAt: { gte: thirtyDaysAgo } }
     });
 
     let localMeetingShowRate = 0;
@@ -62,12 +75,12 @@ export default async function AdminMarketIntelPage({ params }: { params: { slug:
 
     return (
         <MarketIntelClient
-            orgSlug={slug}
+            orgSlug={params.slug}
             companyMetrics={companyMetrics}
             orgData={{
-                industry: (org as any).industry || "general",
-                sizeBand: (org as any).sizeBand || "small",
-                plan: org.plan || "free"
+                industry: normalizeIndustry(org.industry),
+                sizeBand: deriveSizeBand(org.maxUsers),
+                plan: normalizePlan(org.plan)
             }}
         />
     );

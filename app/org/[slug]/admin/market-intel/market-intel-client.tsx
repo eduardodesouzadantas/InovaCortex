@@ -20,7 +20,7 @@ interface MarketIntelClientProps {
 
 export function MarketIntelClient({ orgSlug, companyMetrics, orgData }: MarketIntelClientProps) {
     const [windowFilter, setWindowFilter] = useState<"7d" | "30d" | "90d">("30d");
-    const [benchmarkData, setBenchmarkData] = useState<{ segment: any; snapshot: SnapshotMetrics } | null>(null);
+    const [benchmarkData, setBenchmarkData] = useState<{ segment: any; snapshot: Partial<SnapshotMetrics> | null } | null>(null);
     const [loading, setLoading] = useState(true);
     const [insufficientData, setInsufficientData] = useState(false);
 
@@ -36,15 +36,27 @@ export function MarketIntelClient({ orgSlug, companyMetrics, orgData }: MarketIn
             if (res.status === 204) {
                 setInsufficientData(true);
                 setBenchmarkData(null);
-            } else {
-                const data = await res.json();
-                if (data.insufficient_data) {
-                    setInsufficientData(true);
-                    setBenchmarkData(null);
-                } else {
-                    setBenchmarkData(data);
-                }
+                return;
             }
+
+            const data = await res.json().catch(() => null);
+            if (!res.ok || !data) {
+                setBenchmarkData(null);
+                return;
+            }
+
+            if (data.insufficientData || data.insufficient_data) {
+                setInsufficientData(true);
+                setBenchmarkData(null);
+                return;
+            }
+
+            if (!data.segment || !data.snapshot) {
+                setBenchmarkData(null);
+                return;
+            }
+
+            setBenchmarkData({ segment: data.segment, snapshot: data.snapshot });
         } catch (error) {
             console.error("Failed to load benchmarks", error);
         } finally {
@@ -154,7 +166,7 @@ export function MarketIntelClient({ orgSlug, companyMetrics, orgData }: MarketIn
                             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                                 {(Object.keys(companyMetrics) as Array<keyof SnapshotMetrics>).map((key, i) => {
                                     const localVal = companyMetrics[key];
-                                    const marketVal = benchmarkData.snapshot[key] || 0;
+                                    const marketVal = benchmarkData.snapshot?.[key] ?? 0;
 
                                     const diff = localVal - marketVal;
                                     const isPositive = diff > 0;
