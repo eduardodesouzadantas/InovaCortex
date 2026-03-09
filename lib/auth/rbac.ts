@@ -5,6 +5,8 @@
  * Role hierarchy: owner > admin > closer > viewer
  */
 
+import type { AuthContext, AuthScope } from "./session";
+
 export type Role = "owner" | "admin" | "closer" | "viewer";
 
 // Ordered from least to most privileged
@@ -63,4 +65,21 @@ export type Permission = keyof typeof ROUTE_PERMISSIONS;
 
 export function can(userRole: Role | string, permission: Permission): boolean {
     return hasRole(userRole, ROUTE_PERMISSIONS[permission]);
+}
+
+export function hasAuthScope(
+    auth: Pick<AuthContext, "isAuthenticated" | "authScope"> | null | undefined,
+    requiredScope: AuthScope,
+): boolean {
+    if (!auth?.isAuthenticated) return false;
+    return auth.authScope === requiredScope;
+}
+
+export function assertAuthScope(
+    auth: Pick<AuthContext, "isAuthenticated" | "authScope"> | null | undefined,
+    requiredScope: AuthScope,
+): void {
+    if (!hasAuthScope(auth, requiredScope)) {
+        throw new Error(`FORBIDDEN: requires auth scope '${requiredScope}'`);
+    }
 }

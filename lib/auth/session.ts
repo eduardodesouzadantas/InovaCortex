@@ -8,14 +8,14 @@
 
 import bcrypt from "bcryptjs";
 import { SignJWT, jwtVerify } from "jose";
-import { cookies } from "next/headers";
-import { NextRequest } from "next/server";
+import type { NextRequest } from "next/server";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
 const BCRYPT_ROUNDS = 12;
 const COOKIE_NAME = "session";
 const SESSION_TTL = 60 * 60 * 24 * 7; // 7 days in seconds
+const DEFAULT_AGENCY_ORG_SLUG = "inovacortex";
 
 function getJwtSecret(): Uint8Array {
     const key = process.env.APP_ENCRYPTION_KEY;
@@ -32,6 +32,70 @@ export interface SessionPayload {
     orgId: string;
     orgSlug: string;
     role: "owner" | "admin" | "closer" | "viewer";
+}
+
+export type AuthScope = "agency" | "tenant";
+
+export interface AuthContext {
+    isAuthenticated: boolean;
+    authScope: AuthScope | null;
+    organizationId: string | null;
+    organizationSlug: string | null;
+    userId: string | null;
+    role: SessionPayload["role"] | null;
+    session: SessionPayload | null;
+}
+
+function isTruthyFlag(value: string | undefined): boolean {
+    if (!value) return false;
+    const normalized = value.trim().toLowerCase();
+    return normalized === "1" || normalized === "true" || normalized === "yes" || normalized === "on";
+}
+
+export function isAuthContextSplitEnabled(): boolean {
+    return isTruthyFlag(process.env.FF_AUTH_CONTEXT_SPLIT);
+}
+
+export function getAgencyOrgSlug(): string {
+    // Source of truth for agency identity: canonical internal organization slug.
+    // Defaults to "inovacortex" and can be overridden via AGENCY_ORG_SLUG.
+    const raw = process.env.AGENCY_ORG_SLUG?.trim().toLowerCase();
+    return raw || DEFAULT_AGENCY_ORG_SLUG;
+}
+
+function resolveAuthScopeFromSession(session: SessionPayload): AuthScope {
+    if (!isAuthContextSplitEnabled()) {
+        return "tenant";
+    }
+
+    const orgSlug = session.orgSlug.trim().toLowerCase();
+    return orgSlug === getAgencyOrgSlug() ? "agency" : "tenant";
+}
+
+export function resolveAuthContext(session: SessionPayload | null): AuthContext {
+    if (!session) {
+        return {
+            isAuthenticated: false,
+            authScope: null,
+            organizationId: null,
+            organizationSlug: null,
+            userId: null,
+            role: null,
+            session: null,
+        };
+    }
+
+    const authScope = resolveAuthScopeFromSession(session);
+
+    return {
+        isAuthenticated: true,
+        authScope,
+        organizationId: session.orgId,
+        organizationSlug: session.orgSlug,
+        userId: session.userId,
+        role: session.role,
+        session,
+    };
 }
 
 // ─── Password Utilities ───────────────────────────────────────────────────────
@@ -68,6 +132,7 @@ export async function decodeSessionToken(token: string): Promise<SessionPayload 
 /** Set the session cookie (server action / route handler) */
 export async function setSessionCookie(payload: SessionPayload): Promise<void> {
     const token = await createSessionToken(payload);
+    const { cookies } = await import("next/headers");
     const cookieStore = await cookies();
     cookieStore.set(COOKIE_NAME, token, {
         httpOnly: true,
@@ -80,12 +145,14 @@ export async function setSessionCookie(payload: SessionPayload): Promise<void> {
 
 /** Clear the session cookie */
 export async function clearSessionCookie(): Promise<void> {
+    const { cookies } = await import("next/headers");
     const cookieStore = await cookies();
     cookieStore.delete(COOKIE_NAME);
 }
 
 /** Read and verify session from cookies (server components) */
 export async function getSession(): Promise<SessionPayload | null> {
+    const { cookies } = await import("next/headers");
     const cookieStore = await cookies();
     const token = cookieStore.get(COOKIE_NAME)?.value;
     if (!token) return null;
@@ -99,6 +166,14 @@ export async function getSessionFromRequest(req: NextRequest): Promise<SessionPa
     return decodeSessionToken(token);
 }
 
+export async function getAuthContext(): Promise<AuthContext> {
+    return resolveAuthContext(await getSession());
+}
+
+export async function getAuthContextFromRequest(req: NextRequest): Promise<AuthContext> {
+    return resolveAuthContext(await getSessionFromRequest(req));
+}
+
 // ─── Auth Guards ──────────────────────────────────────────────────────────────
 
 /** Require authenticated session — throws redirect-friendly Error if not */
@@ -110,7 +185,11 @@ export async function requireSession(): Promise<SessionPayload> {
 
 /** Require session belongs to a specific org */
 export async function requireOrgSession(orgSlug: string): Promise<SessionPayload> {
-    const session = await requireSession();
-    if (session.orgSlug !== orgSlug) throw new Error("FORBIDDEN");
-    return session;
+    const auth = await getAuthContext();
+    if (!auth.isAuthenticated || !auth.session) throw new Error("UNAUTHENTICATED");
+
+    if (auth.authScope !== "tenant") throw new Error("FORBIDDEN");
+    if (auth.organizationSlug !== orgSlug) throw new Error("FORBIDDEN");
+
+    return auth.session;
 }

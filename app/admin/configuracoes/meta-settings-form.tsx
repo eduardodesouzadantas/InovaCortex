@@ -12,7 +12,13 @@ interface SettingField {
     fromEnv: boolean;
 }
 
-export function MetaSettingsForm({ initialValues }: { initialValues: SettingField[] }) {
+export function MetaSettingsForm({
+    initialValues,
+    orgSlug,
+}: {
+    initialValues: SettingField[];
+    orgSlug?: string;
+}) {
     const [values, setValues] = useState<Record<string, string>>(
         Object.fromEntries(initialValues.map(s => [s.key, s.value]))
     );
@@ -28,7 +34,10 @@ export function MetaSettingsForm({ initialValues }: { initialValues: SettingFiel
         setIsSaving(true);
         setSaveStatus("idle");
         try {
-            const res = await fetch("/api/admin/config", {
+            const endpoint = orgSlug
+                ? `/api/org/${encodeURIComponent(orgSlug)}/whatsapp/config/meta`
+                : "/api/admin/config";
+            const res = await fetch(endpoint, {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify(

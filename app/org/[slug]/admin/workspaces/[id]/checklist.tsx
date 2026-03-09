@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 "use client";
 
 import { useState } from "react";
@@ -30,31 +31,27 @@ export function WorkspaceChecklist({
     items,
     workspaceId,
     canEdit,
+    apiBasePath = "/api/admin/workspaces",
 }: {
     items: ChecklistItem[];
     workspaceId: string;
     canEdit: boolean;
+    apiBasePath?: string;
 }) {
     const [localItems, setLocalItems] = useState<ChecklistItem[]>(items);
-    const [loading, setLoading] = useState<Record<string, boolean>>({});
 
     const cycleStatus = async (item: ChecklistItem) => {
         if (!canEdit) return;
         const cfg = STATUS_CONFIG[item.status] ?? STATUS_CONFIG.pending;
         const nextStatus = cfg.next;
 
-        setLoading(prev => ({ ...prev, [item.id]: true }));
-        try {
-            const res = await fetch(`/api/admin/workspaces/${workspaceId}/checklist/${item.id}`, {
-                method: "PATCH",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ status: nextStatus }),
-            });
-            if (res.ok) {
-                setLocalItems(prev => prev.map(i => i.id === item.id ? { ...i, status: nextStatus } : i));
-            }
-        } finally {
-            setLoading(prev => ({ ...prev, [item.id]: false }));
+        const res = await fetch(`${apiBasePath}/${workspaceId}/checklist/${item.id}`, {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ status: nextStatus }),
+        });
+        if (res.ok) {
+            setLocalItems(prev => prev.map(i => i.id === item.id ? { ...i, status: nextStatus } : i));
         }
     };
 

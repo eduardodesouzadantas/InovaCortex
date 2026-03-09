@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any, react/no-unescaped-entities */
 "use client";
 
 import { useState } from "react";
@@ -20,7 +21,13 @@ interface PreSalesData {
     createdAt: string;
 }
 
-export function PreSalesPanel({ assessmentId }: { assessmentId: string }) {
+export function PreSalesPanel({
+    assessmentId,
+    apiBasePath = "/api/admin/leads",
+}: {
+    assessmentId: string;
+    apiBasePath?: string;
+}) {
     const [isLoading, setIsLoading] = useState(false);
     const [artifact, setArtifact] = useState<PreSalesData | null>(null);
     const [error, setError] = useState<string | null>(null);
@@ -31,7 +38,7 @@ export function PreSalesPanel({ assessmentId }: { assessmentId: string }) {
         setIsLoading(true);
         setError(null);
         try {
-            const res = await fetch(`/api/admin/leads/${assessmentId}/generate-presales`, {
+            const res = await fetch(`${apiBasePath}/${assessmentId}/generate-presales`, {
                 method: "POST"
             });
             const data = await res.json();

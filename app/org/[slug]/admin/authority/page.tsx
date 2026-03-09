@@ -7,14 +7,23 @@
  *  - ProofAsset list with status filter (draft/reviewed/approved/published)
  *  - Per-asset: markdown viewer, type badge, review/approve/publish buttons
  */
+/* eslint-disable @typescript-eslint/no-explicit-any */
 
 import { notFound, redirect } from "next/navigation";
 import { requireOrgContext } from "@/lib/auth/org-context";
+import { getAuthContext } from "@/lib/auth/session";
 import { AuthorityLibraryClient } from "./authority-library-client";
 
 interface Props {
     params: { slug: string };
     searchParams: { status?: string; type?: string };
+}
+
+function isAgencyUiContentEnabled(): boolean {
+    const raw = process.env.FF_AGENCY_UI_CONTENT;
+    if (typeof raw === "undefined") return true;
+    const normalized = raw.trim().toLowerCase();
+    return normalized === "1" || normalized === "true" || normalized === "yes" || normalized === "on";
 }
 
 async function getData(slug: string, filters: { status?: string; type?: string }) {
@@ -46,9 +55,13 @@ async function getData(slug: string, filters: { status?: string; type?: string }
 }
 
 export default async function AuthorityAdminPage({ params, searchParams }: Props) {
-    let ctx;
-    try { ctx = await requireOrgContext(params.slug); }
-    catch { redirect("/admin/login"); }
+    const auth = await getAuthContext();
+    if (isAgencyUiContentEnabled() && auth.isAuthenticated && auth.authScope === "agency") {
+        redirect("/agency/authority");
+    }
+
+    try { await requireOrgContext(params.slug); }
+    catch { redirect(`/org/${params.slug}/admin/login`); }
 
     const data = await getData(params.slug, searchParams);
     if (!data) notFound();

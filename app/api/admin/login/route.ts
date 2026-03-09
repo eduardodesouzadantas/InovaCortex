@@ -1,38 +1,29 @@
 export const runtime = "nodejs";
 
-import { NextResponse } from "next/server";
-import { cookies } from "next/headers";
+import { type NextResponse } from "next/server";
+import { loginWithPassword } from "@/lib/auth/login-service";
 
+const SUCCESSOR_ENDPOINT = "/api/agency/auth/login";
+const DEPRECATION_DATE = "Mon, 09 Mar 2026 00:00:00 GMT";
+const SUNSET_DATE = "Tue, 30 Jun 2026 23:59:59 GMT";
+
+function applyDeprecationHeaders(response: NextResponse): NextResponse {
+    response.headers.set("Deprecation", DEPRECATION_DATE);
+    response.headers.set("Sunset", SUNSET_DATE);
+    response.headers.set("Link", `<${SUCCESSOR_ENDPOINT}>; rel="successor-version"`);
+    response.headers.set("Warning", `299 - "Deprecated endpoint. Use ${SUCCESSOR_ENDPOINT}"`);
+    response.headers.set("X-Deprecated-Endpoint", "/api/admin/login");
+    return response;
+}
+
+/**
+ * POST /api/admin/login (legacy adapter)
+ * Temporary compatibility layer that forwards auth to the canonical agency login logic.
+ */
 export async function POST(request: Request) {
-    try {
-        const { email, password } = await request.json();
-
-        // In V1, we use env variables for a fast admin setup
-        const secretAdminEmail = process.env.ADMIN_EMAIL;
-        const secretAdminPass = process.env.ADMIN_PASSWORD;
-
-        if (!secretAdminPass || !secretAdminEmail) {
-            return NextResponse.json({ error: "Configuration Error" }, { status: 500 });
-        }
-
-        if (email === secretAdminEmail && password === secretAdminPass) {
-            // Set httpOnly cookie
-            const cookieStore = await cookies();
-            cookieStore.set({
-                name: "admin_token",
-                value: "authenticated_true", // In prod, this should be a JWT signed with a secret
-                httpOnly: true,
-                secure: process.env.NODE_ENV === "production",
-                sameSite: "strict",
-                path: "/",
-                maxAge: 60 * 60 * 24 // 1 day
-            });
-
-            return NextResponse.json({ success: true });
-        }
-
-        return NextResponse.json({ error: "Invalid password" }, { status: 401 });
-    } catch (error) {
-        return NextResponse.json({ error: "Internal Server Error" }, { status: 500 });
-    }
+    const response = await loginWithPassword(request, {
+        endpoint: "admin_adapter",
+        requireScope: "agency",
+    });
+    return applyDeprecationHeaders(response);
 }

@@ -1,8 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
-import { prisma } from "@/lib/prisma";
 import { getSession } from "@/lib/auth/session";
 import { assertRole } from "@/lib/auth/rbac";
-import { runNudgeChecks } from "@/lib/provisioning";
+import {
+    applyLegacyAdminApiDeprecationHeaders,
+    createLegacyAdminFinalRedirectResponse,
+    createLegacyAdminWriteFrozenResponse,
+} from "@/lib/auth/admin-api-guard";
+import { listWorkspacesHandler, runWorkspaceNudgeHandler } from "@/lib/agency/commercial/workspaces";
 
 export const runtime = "nodejs";
 
@@ -12,6 +16,11 @@ export const runtime = "nodejs";
  * admin+ only.
  */
 export async function POST(request: NextRequest) {
+    const redirectResponse = createLegacyAdminFinalRedirectResponse(request, {
+        successorPath: "/api/agency/commercial/workspaces/nudge",
+    });
+    if (redirectResponse) return redirectResponse;
+
     const session = await getSession();
     if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
@@ -21,8 +30,15 @@ export async function POST(request: NextRequest) {
         return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }
 
-    const result = await runNudgeChecks(session.orgId);
-    return NextResponse.json({ success: true, ...result });
+    const frozen = createLegacyAdminWriteFrozenResponse({
+        successorPath: "/api/agency/commercial/workspaces/nudge",
+    });
+    if (frozen) return frozen;
+
+    const response = await runWorkspaceNudgeHandler(session.orgId, session.userId);
+    return applyLegacyAdminApiDeprecationHeaders(response, {
+        successorPath: "/api/agency/commercial/workspaces/nudge",
+    });
 }
 
 /**
@@ -30,30 +46,15 @@ export async function POST(request: NextRequest) {
  * List all workspaces for the current org.
  */
 export async function GET(request: NextRequest) {
+    const redirectResponse = createLegacyAdminFinalRedirectResponse(request, {
+        successorPath: "/api/agency/commercial/workspaces",
+    });
+    if (redirectResponse) return redirectResponse;
+
     const session = await getSession();
     if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-
-    const workspaces = await (prisma as any).clientWorkspace.findMany({
-        where: { organizationId: session.orgId },
-        include: {
-            tasks: { select: { status: true } },
-            checklist: { select: { status: true } },
-        },
-        orderBy: { createdAt: "desc" },
+    const response = await listWorkspacesHandler(session.orgId);
+    return applyLegacyAdminApiDeprecationHeaders(response, {
+        successorPath: "/api/agency/commercial/workspaces",
     });
-
-    const enriched = workspaces.map((ws: any) => ({
-        ...ws,
-        taskCounts: {
-            total: ws.tasks.length,
-            done: ws.tasks.filter((t: any) => t.status === "done").length,
-            blocked: ws.tasks.filter((t: any) => t.status === "blocked").length,
-        },
-        checklistCounts: {
-            total: ws.checklist.length,
-            verified: ws.checklist.filter((c: any) => c.status === "verified").length,
-        },
-    }));
-
-    return NextResponse.json({ workspaces: enriched });
 }

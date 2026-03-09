@@ -6,9 +6,10 @@ import { Save, Loader2 } from "lucide-react";
 interface InternalNotesProps {
     leadId: string;
     initialNotes: string | null;
+    apiBasePath?: string;
 }
 
-export function InternalNotesEditor({ leadId, initialNotes }: InternalNotesProps) {
+export function InternalNotesEditor({ leadId, initialNotes, apiBasePath = "/api/admin/leads" }: InternalNotesProps) {
     const [notes, setNotes] = useState(initialNotes || "");
     const [isSaving, setIsSaving] = useState(false);
     const [savedStatus, setSavedStatus] = useState<"idle" | "saved" | "error">("idle");
@@ -18,7 +19,7 @@ export function InternalNotesEditor({ leadId, initialNotes }: InternalNotesProps
         setSavedStatus("idle");
 
         try {
-            const res = await fetch(`/api/admin/leads/${leadId}`, {
+            const res = await fetch(`${apiBasePath}/${leadId}`, {
                 method: "PATCH",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({ internalNotes: notes })

@@ -1,16 +1,22 @@
 import { redirect } from "next/navigation";
 import { prisma } from "@/lib/prisma";
-import { getSession } from "@/lib/auth/session";
+import { getAuthContext, getSession } from "@/lib/auth/session";
 import { ExecutiveDashboardClient } from "./executive-dashboard-client";
+import { isAgencyMonitoringNamespaceEnabled } from "@/lib/agency/monitoring/flag";
 
 export default async function ExecutiveDashboardPage({
     params,
 }: {
     params: { slug: string };
 }) {
+    const auth = await getAuthContext();
+    if (isAgencyMonitoringNamespaceEnabled() && auth.isAuthenticated && auth.authScope === "agency") {
+        redirect("/agency/executive");
+    }
+
     const session = await getSession();
     if (!session || session.orgSlug !== params.slug) {
-        redirect("/auth/login");
+        redirect(`/org/${params.slug}/admin/login`);
     }
 
     const org = await prisma.organization.findUnique({

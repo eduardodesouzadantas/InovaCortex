@@ -1,9 +1,11 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 import { redirect } from "next/navigation";
 import { requireOrgContext } from "@/lib/auth/org-context";
 import { assertRole } from "@/lib/auth/rbac";
 import { prisma } from "@/lib/prisma";
+import { getAuthContext } from "@/lib/auth/session";
 import Link from "next/link";
-import { ChevronLeft, Briefcase, CheckCircle2, Clock, AlertTriangle, Zap, ArrowRight } from "lucide-react";
+import { ChevronLeft, Briefcase, CheckCircle2, AlertTriangle, Zap, ArrowRight } from "lucide-react";
 
 export const runtime = "nodejs";
 
@@ -14,10 +16,22 @@ const STATUS_CONFIG: Record<string, { label: string; color: string; dot: string 
     completed: { label: "Completo", color: "text-blue-400", dot: "bg-blue-400" },
 };
 
+function isAgencyCommercialUiEnabled(): boolean {
+    const raw = process.env.FF_AGENCY_COMMERCIAL_UI;
+    if (typeof raw === "undefined") return true;
+    const normalized = raw.trim().toLowerCase();
+    return normalized === "1" || normalized === "true" || normalized === "yes" || normalized === "on";
+}
+
 export default async function WorkspacesListPage({
     params
 }: { params: Promise<{ slug: string }> }) {
     const { slug } = await params;
+
+    const auth = await getAuthContext();
+    if (isAgencyCommercialUiEnabled() && auth.isAuthenticated && auth.authScope === "agency") {
+        redirect("/agency/commercial/workspaces");
+    }
 
     let ctx: Awaited<ReturnType<typeof requireOrgContext>>;
     try {

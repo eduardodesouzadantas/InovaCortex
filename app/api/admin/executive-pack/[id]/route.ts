@@ -1,27 +1,39 @@
-/**
- * app/api/admin/executive-pack/[id]/route.ts
- * V24: GET — retrieve a generated executive pack by slug/id.
- */
-
 import { NextRequest, NextResponse } from "next/server";
-import { logger } from "@/lib/logger";
+import {
+    applyLegacyAdminApiDeprecationHeaders,
+    createLegacyAdminFinalRedirectResponse,
+    requireAdminApiAccess,
+} from "@/lib/auth/admin-api-guard";
+import { getExecutivePack } from "@/lib/agency/executive-pack/handlers";
+
+function respond(mode: "session" | "legacy_admin_token", body: unknown, init?: ResponseInit) {
+    return applyLegacyAdminApiDeprecationHeaders(NextResponse.json(body, init), {
+        successorPath: "/api/agency/executive-pack/[id]",
+        mode,
+    });
+}
 
 export async function GET(
-    _req: NextRequest,
+    request: NextRequest,
     { params }: { params: Promise<{ id: string }> },
 ) {
     const { id } = await params;
-    try {
-        const { prisma } = await import("@/lib/prisma");
-        const pack = await (prisma as any).execPack.findFirst({
-            where: { OR: [{ id }, { publicSlug: id }] },
-        });
-        if (!pack) return NextResponse.json({ error: "Not found" }, { status: 404 });
+    const redirectResponse = createLegacyAdminFinalRedirectResponse(request, {
+        successorPath: `/api/agency/executive-pack/${id}`,
+    });
+    if (redirectResponse) return redirectResponse;
 
-        const payload = JSON.parse(pack.payloadJson);
-        return NextResponse.json({ ok: true, pack: payload, meta: { status: pack.status, generatedAt: pack.generatedAt } });
-    } catch (err: any) {
-        logger.error("[ExecPack GET]", { id, err: err?.message });
-        return NextResponse.json({ error: "Internal error" }, { status: 500 });
+    const access = await requireAdminApiAccess(request, {
+        requiredRole: "admin",
+        allowLegacyTokenFallback: false,
+    });
+    if (!access.ok) return NextResponse.json({ error: access.error }, { status: access.status });
+
+    try {
+        const result = await getExecutivePack(id);
+        if (!result) return respond(access.mode, { error: "Not found" }, { status: 404 });
+        return respond(access.mode, result);
+    } catch {
+        return respond(access.mode, { error: "Internal error" }, { status: 500 });
     }
 }

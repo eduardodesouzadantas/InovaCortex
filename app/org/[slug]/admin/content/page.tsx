@@ -1,16 +1,25 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 import { redirect } from "next/navigation";
 import { requireOrgContext } from "@/lib/auth/org-context";
 import { assertRole } from "@/lib/auth/rbac";
+import { getAuthContext } from "@/lib/auth/session";
 import { prisma } from "@/lib/prisma";
 import Link from "next/link";
 import { ContentGenerateButton } from "./generate-button";
 import { ContentStatusBadge } from "./status-badge";
 import {
     ChevronLeft, Linkedin, Instagram, FileText,
-    MessageSquare, Video, BarChart2, Plus, ExternalLink
+    MessageSquare, Video, BarChart2, ExternalLink
 } from "lucide-react";
 
 export const runtime = "nodejs";
+
+function isAgencyUiContentEnabled(): boolean {
+    const raw = process.env.FF_AGENCY_UI_CONTENT;
+    if (typeof raw === "undefined") return true;
+    const normalized = raw.trim().toLowerCase();
+    return normalized === "1" || normalized === "true" || normalized === "yes" || normalized === "on";
+}
 
 const TYPE_CONFIG: Record<string, { label: string; icon: any; color: string }> = {
     linkedin: { label: "LinkedIn", icon: Linkedin, color: "text-blue-400" },
@@ -31,6 +40,11 @@ export default async function ContentDashboardPage({
 }) {
     const { slug } = await params;
     const sp = await searchParams;
+
+    const auth = await getAuthContext();
+    if (isAgencyUiContentEnabled() && auth.isAuthenticated && auth.authScope === "agency") {
+        redirect("/agency/content");
+    }
 
     let ctx: Awaited<ReturnType<typeof requireOrgContext>>;
     try {
@@ -144,7 +158,7 @@ export default async function ContentDashboardPage({
                         <div className="text-center py-16 text-muted-foreground">
                             <BarChart2 className="w-12 h-12 mx-auto mb-3 opacity-20" />
                             <p>Nenhum conteúdo gerado ainda.</p>
-                            <p className="text-xs mt-1 opacity-60">Use o botão "Gerar Conteúdo" para criar o primeiro artefato.</p>
+                            <p className="text-xs mt-1 opacity-60">Use o botão &quot;Gerar Conteúdo&quot; para criar o primeiro artefato.</p>
                         </div>
                     )}
                     {artifacts.map((a: any) => {
@@ -187,3 +201,4 @@ export default async function ContentDashboardPage({
         </div>
     );
 }
+

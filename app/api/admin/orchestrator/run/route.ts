@@ -1,20 +1,43 @@
-import { NextResponse } from "next/server";
-import { getSession } from "@/lib/auth/session";
-import { Orchestrator } from "@/lib/orchestrator/orchestrator";
-import { can } from "@/lib/auth/rbac";
+import { NextRequest, NextResponse } from "next/server";
+import {
+    applyLegacyAdminApiDeprecationHeaders,
+    createLegacyAdminFinalRedirectResponse,
+    createLegacyAdminWriteFrozenResponse,
+    requireAdminApiAccess,
+} from "@/lib/auth/admin-api-guard";
+import { runOrchestratorQueue } from "@/lib/agency/monitoring/orchestrator-handlers";
 
-export async function POST() {
-    try {
-        const session = await getSession();
-        if (!session || !can(session.role, "manageSettings")) {
-            return new NextResponse("Unauthorized", { status: 401 });
-        }
+function respond(mode: "session" | "legacy_admin_token", body: unknown, init?: ResponseInit) {
+    return applyLegacyAdminApiDeprecationHeaders(NextResponse.json(body, init), {
+        successorPath: "/api/agency/monitoring/orchestrator/run",
+        mode,
+    });
+}
 
-        // Process Action Queue for this org
-        await Orchestrator.processQueue(session.orgId);
+export async function POST(request: NextRequest) {
+    const redirectResponse = createLegacyAdminFinalRedirectResponse(request, {
+        successorPath: "/api/agency/monitoring/orchestrator/run",
+    });
+    if (redirectResponse) return redirectResponse;
 
-        return NextResponse.json({ success: true, message: "Queue processed" });
-    } catch (e: any) {
-        return NextResponse.json({ error: e.message }, { status: 500 });
+    const access = await requireAdminApiAccess(request, {
+        requiredRole: "admin",
+        allowLegacyTokenFallback: false,
+    });
+    if (!access.ok) return NextResponse.json({ error: access.error }, { status: access.status });
+    if (!access.auth?.organizationId && access.mode === "session") {
+        return respond(access.mode, { error: "Forbidden" }, { status: 403 });
     }
+
+    const frozen = createLegacyAdminWriteFrozenResponse({
+        successorPath: "/api/agency/monitoring/orchestrator/run",
+        mode: access.mode,
+    });
+    if (frozen) return frozen;
+
+    const orgId = access.auth?.organizationId;
+    if (!orgId) return respond(access.mode, { error: "Organization context required" }, { status: 403 });
+
+    const result = await runOrchestratorQueue(orgId);
+    return respond(access.mode, result);
 }

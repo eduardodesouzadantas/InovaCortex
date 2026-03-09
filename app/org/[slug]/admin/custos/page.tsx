@@ -1,7 +1,10 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 import { redirect } from "next/navigation";
 import { requireOrgContext } from "@/lib/auth/org-context";
 import { assertRole } from "@/lib/auth/rbac";
+import { getAuthContext } from "@/lib/auth/session";
 import { prisma } from "@/lib/prisma";
+import { isAgencyMonitoringNamespaceEnabled } from "@/lib/agency/monitoring/flag";
 import Link from "next/link";
 import { ChevronLeft, BrainCircuit, DollarSign, Zap, TrendingUp, BarChart2 } from "lucide-react";
 
@@ -9,9 +12,6 @@ export const runtime = "nodejs";
 
 function formatUSD(n: number) {
     return new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 4 }).format(n);
-}
-function formatBRL(n: number) {
-    return new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL", maximumFractionDigits: 2 }).format(n);
 }
 function fmt(n: number) {
     return new Intl.NumberFormat("pt-BR").format(Math.round(n));
@@ -21,6 +21,11 @@ export default async function CostDashboardPage({
     params
 }: { params: Promise<{ slug: string }> }) {
     const { slug } = await params;
+
+    const auth = await getAuthContext();
+    if (isAgencyMonitoringNamespaceEnabled() && auth.isAuthenticated && auth.authScope === "agency") {
+        redirect("/agency/costs");
+    }
 
     let ctx: Awaited<ReturnType<typeof requireOrgContext>>;
     try {
@@ -173,7 +178,7 @@ export default async function CostDashboardPage({
                                     </tr>
                                 </thead>
                                 <tbody>
-                                    {topLeads.map((row: any, i: number) => {
+                                    {topLeads.map((row: any) => {
                                         const a = assessmentMap[row.assessmentId];
                                         return (
                                             <tr key={row.assessmentId} className="border-b border-border/20 hover:bg-muted/10 transition-colors">

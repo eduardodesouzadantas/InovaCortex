@@ -1,7 +1,8 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 "use client";
 
 import { Assessment } from "@prisma/client";
-import { Copy, ExternalLink, Calendar, CheckCircle2, ChevronRight } from "lucide-react";
+import { Calendar, CheckCircle2, ChevronRight } from "lucide-react";
 import Link from "next/link";
 import { AdminActions } from "./admin-actions";
 
@@ -12,9 +13,10 @@ interface KanbanCardProps {
         messageLogs?: { status: string }[];
         assignments?: any[];
     };
+    leadBasePath?: string;
 }
 
-export function KanbanCard({ lead }: KanbanCardProps) {
+export function KanbanCard({ lead, leadBasePath = "/admin" }: KanbanCardProps) {
     const isHighPriority = lead.classification === "Alta prioridade";
 
     return (
@@ -72,7 +74,7 @@ export function KanbanCard({ lead }: KanbanCardProps) {
                     <span className="text-[10px] text-muted-foreground italic">Processando...</span>
                 )}
 
-                <Link href={`/admin/${lead.id}`} className="p-1 hover:bg-muted rounded-md text-foreground transition-colors ml-auto">
+                <Link href={`${leadBasePath}/${lead.id}`} className="p-1 hover:bg-muted rounded-md text-foreground transition-colors ml-auto">
                     <ChevronRight className="w-4 h-4" />
                 </Link>
             </div>

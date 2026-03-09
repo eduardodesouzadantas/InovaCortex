@@ -1,57 +1,58 @@
 import { NextRequest, NextResponse } from "next/server";
-import { prisma } from "@/lib/prisma";
-import { getSession } from "@/lib/auth/session";
+import {
+    applyLegacyAdminApiDeprecationHeaders,
+    createLegacyAdminFinalRedirectResponse,
+    requireAdminApiAccess,
+} from "@/lib/auth/admin-api-guard";
+import { resolveTargetOrgId } from "@/lib/agency/target-org";
+import { buildAuditCsv } from "@/lib/agency/audit/export-handler";
 
 export const runtime = "nodejs";
 
-/**
- * GET /api/admin/audit/export
- * Exports audit events as CSV for the org.
- */
+function withDeprecation(response: NextResponse, mode: "session" | "legacy_admin_token") {
+    return applyLegacyAdminApiDeprecationHeaders(response, {
+        successorPath: "/api/agency/audit/export",
+        mode,
+    });
+}
+
 export async function GET(request: NextRequest) {
-    const session = await getSession();
-    if (!session || !["owner", "admin"].includes(session.role)) {
-        return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    const redirectResponse = createLegacyAdminFinalRedirectResponse(request, {
+        successorPath: "/api/agency/audit/export",
+    });
+    if (redirectResponse) return redirectResponse;
+
+    const access = await requireAdminApiAccess(request, {
+        requiredRole: "admin",
+        allowLegacyTokenFallback: false,
+    });
+    if (!access.ok) return NextResponse.json({ error: access.error }, { status: access.status });
+    if (!access.auth?.organizationId) {
+        return withDeprecation(NextResponse.json({ error: "Forbidden" }, { status: 403 }), access.mode);
     }
 
-    const { searchParams } = new URL(request.url);
-    const type = searchParams.get("type") ?? undefined;
-    const from = searchParams.get("from") ?? undefined;
-    const to = searchParams.get("to") ?? undefined;
-
-    const where: any = { organizationId: session.orgId };
-    if (type) where.action = type;
-    if (from || to) {
-        where.createdAt = {};
-        if (from) where.createdAt.gte = new Date(from);
-        if (to) where.createdAt.lte = new Date(to + "T23:59:59Z");
+    let orgId: string;
+    try {
+        orgId = await resolveTargetOrgId({
+            requestUrl: request.url,
+            defaultOrgId: access.auth.organizationId,
+        });
+    } catch {
+        return withDeprecation(NextResponse.json({ error: "Organization not found" }, { status: 404 }), access.mode);
     }
 
-    const events = await (prisma as any).auditEvent.findMany({
-        where,
-        orderBy: { createdAt: "desc" },
-        take: 5000,
-        include: { assessment: { select: { company: true, email: true, scoreTotal: true } } },
+    const searchParams = new URL(request.url).searchParams;
+    const { csv, filename } = await buildAuditCsv({
+        orgId,
+        type: searchParams.get("type") ?? undefined,
+        from: searchParams.get("from") ?? undefined,
+        to: searchParams.get("to") ?? undefined,
     });
 
-    // Build CSV
-    const header = ["id", "action", "company", "email", "score", "details", "createdAt"].join(",");
-    const rows = events.map((ev: any) => [
-        ev.id,
-        ev.action,
-        ev.assessment?.company ?? "",
-        ev.assessment?.email ?? "",
-        ev.assessment?.scoreTotal ?? "",
-        (ev.details ?? "").replace(/"/g, '""').replace(/\n/g, " "),
-        new Date(ev.createdAt).toISOString(),
-    ].map(v => `"${v}"`).join(","));
-
-    const csv = [header, ...rows].join("\n");
-
-    return new NextResponse(csv, {
+    return withDeprecation(new NextResponse(csv, {
         headers: {
             "Content-Type": "text/csv; charset=utf-8",
-            "Content-Disposition": `attachment; filename="audit-${session.orgId}-${new Date().toISOString().slice(0, 10)}.csv"`,
-        }
-    });
+            "Content-Disposition": `attachment; filename="${filename}"`,
+        },
+    }), access.mode);
 }

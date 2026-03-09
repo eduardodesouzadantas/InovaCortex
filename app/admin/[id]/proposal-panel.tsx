@@ -1,9 +1,10 @@
+/* eslint-disable @typescript-eslint/no-explicit-any, react/no-unescaped-entities */
 "use client";
 
 import { useState, useCallback } from "react";
 import {
-    FileText, RefreshCw, Loader2, Send, Download,
-    CheckCircle2, Package, Calendar, DollarSign, TrendingUp,
+    FileText, RefreshCw, Loader2, Send,
+    CheckCircle2, Package, DollarSign, TrendingUp,
     ChevronDown, ChevronUp, Copy, ExternalLink
 } from "lucide-react";
 
@@ -42,7 +43,13 @@ function formatBRL(n: number) {
 
 // ─── Component ────────────────────────────────────────────────────────────────
 
-export function ProposalPanel({ assessmentId }: { assessmentId: string }) {
+export function ProposalPanel({
+    assessmentId,
+    apiBasePath = "/api/admin/leads",
+}: {
+    assessmentId: string;
+    apiBasePath?: string;
+}) {
     const [proposal, setProposal] = useState<ProposalData | null>(null);
     const [allVersions, setAllVersions] = useState<ProposalData[]>([]);
     const [isLoading, setIsLoading] = useState(false);
@@ -55,7 +62,7 @@ export function ProposalPanel({ assessmentId }: { assessmentId: string }) {
     const loadProposals = useCallback(async () => {
         setIsLoading(true);
         try {
-            const res = await fetch(`/api/admin/leads/${assessmentId}/proposal`);
+            const res = await fetch(`${apiBasePath}/${assessmentId}/proposal`);
             const data = await res.json();
             if (res.ok && data.proposals?.length > 0) {
                 setAllVersions(data.proposals);
@@ -65,7 +72,7 @@ export function ProposalPanel({ assessmentId }: { assessmentId: string }) {
             setIsLoading(false);
             setLoadedOnce(true);
         }
-    }, [assessmentId]);
+    }, [assessmentId, apiBasePath]);
 
     // Lazy load on first expand
     const handleInit = () => {
@@ -75,7 +82,7 @@ export function ProposalPanel({ assessmentId }: { assessmentId: string }) {
     const generate = async () => {
         setIsGenerating(true);
         try {
-            const res = await fetch(`/api/admin/leads/${assessmentId}/proposal`, { method: "POST" });
+            const res = await fetch(`${apiBasePath}/${assessmentId}/proposal`, { method: "POST" });
             const data = await res.json();
             if (!res.ok) throw new Error(data.error);
             setProposal(data.proposal);
@@ -91,7 +98,7 @@ export function ProposalPanel({ assessmentId }: { assessmentId: string }) {
         if (!proposal) return;
         setStatus("saving");
         try {
-            const res = await fetch(`/api/admin/leads/${assessmentId}/proposal`, {
+            const res = await fetch(`${apiBasePath}/${assessmentId}/proposal`, {
                 method: "PATCH",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({ proposalId: proposal.id, status: newStatus }),
@@ -112,7 +119,7 @@ export function ProposalPanel({ assessmentId }: { assessmentId: string }) {
             m.id === moduleId ? { ...m, included } : m
         );
         setProposal(prev => prev ? { ...prev, modules: newModules } : null);
-        await fetch(`/api/admin/leads/${assessmentId}/proposal`, {
+        await fetch(`${apiBasePath}/${assessmentId}/proposal`, {
             method: "PATCH",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ proposalId: proposal.id, modules: newModules }),

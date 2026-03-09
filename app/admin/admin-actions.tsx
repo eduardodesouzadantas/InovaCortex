@@ -59,7 +59,7 @@ export function AdminActions({
             </a>
             <button
                 onClick={whatsappConsent ? () => {
-                    fetch('/api/whatsapp/send', {
+                    fetch('/api/agency/whatsapp/send', {
                         method: 'POST',
                         body: JSON.stringify({ assessmentId }),
                         headers: { 'Content-Type': 'application/json' }

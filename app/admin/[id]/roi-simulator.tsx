@@ -27,9 +27,11 @@ function formatBRL(n: number) {
 export function ROISimulator({
     assessmentId,
     initialROI,
+    apiBasePath = "/api/admin/leads",
 }: {
     assessmentId: string;
     initialROI: ROIData;
+    apiBasePath?: string;
 }) {
     const [roi, setROI] = useState<ROIData>(initialROI);
     const [avgHourlyCost, setAvgHourlyCost] = useState(initialROI.avgHourlyCost ?? 80);
@@ -41,7 +43,7 @@ export function ROISimulator({
     const recalculate = async (save = false) => {
         setIsLoading(true);
         try {
-            const res = await fetch(`/api/admin/leads/${assessmentId}/roi`, {
+            const res = await fetch(`${apiBasePath}/${assessmentId}/roi`, {
                 method: "PATCH",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({ avgHourlyCost, avgTicket, conversionRate }),

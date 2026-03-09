@@ -1,87 +1,186 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { cookies } from "next/headers";
-import { encrypt, maskToken, isEncrypted } from "@/lib/security/crypto";
-import { logAudit } from "@/lib/audit";
-import { logger } from "@/lib/logger";
+import {
+    applyLegacyAdminApiDeprecationHeaders,
+    createLegacyAdminFinalRedirectResponse,
+    createLegacyAdminWriteFrozenResponse,
+} from "@/lib/auth/admin-api-guard";
+import { getAgencyOrgSlug, getAuthContextFromRequest } from "@/lib/auth/session";
+import { hasRole } from "@/lib/auth/rbac";
+import { writeAuditEvent } from "@/lib/audit";
+import { listMaskedMetaSettings, sanitizeMetaSettingInputs, upsertMetaSettings } from "@/lib/whatsapp/meta-settings";
 
 export const runtime = "nodejs";
 
-/**
- * POST /api/admin/config
- * Save Meta API settings, encrypting values before storing in DB.
- * Body: [{ key: string, value: string }]
- */
-export async function POST(request: Request) {
-    try {
-        const cookieStore = await cookies();
-        const token = cookieStore.get("admin_token");
+type LegacyConfigResolution = {
+    organizationId: string;
+    successorPath: string;
+    actorUserId: string;
+    actorScope: "agency" | "tenant";
+};
 
-        if (!token || token.value !== "authenticated_true") {
-            return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-        }
-
-        const body = await request.json();
-
-        if (!Array.isArray(body)) {
-            return NextResponse.json({ error: "Invalid format. Expected array." }, { status: 400 });
-        }
-
-        const upsertPromises = body
-            .filter((s: { key: string; value: string }) => s.key && s.value !== undefined)
-            .map((setting: { key: string; value: string }) => {
-                // Only encrypt if a real value is provided and it's not already encrypted
-                const valueToStore = setting.value
-                    ? (isEncrypted(setting.value) ? setting.value : encrypt(setting.value))
-                    : setting.value;
-
-                return (prisma as any).systemSetting.upsert({
-                    where: { key: setting.key },
-                    update: { value: valueToStore },
-                    create: { key: setting.key, value: valueToStore },
-                });
-            });
-
-        await prisma.$transaction(upsertPromises);
-
-        // Audit: log token updates (without exposing actual values)
-        const updatedKeys = body.map((s: { key: string }) => s.key);
-        await logAudit("token", "system", "updated", { keys: updatedKeys });
-
-        logger.info("System settings updated", { keys: updatedKeys });
-
-        return NextResponse.json({ success: true });
-    } catch (e: any) {
-        logger.error("Config route error", { error: e?.message });
-        return NextResponse.json({ error: "Internal Error" }, { status: 500 });
-    }
+function withDeprecation(response: NextResponse, successorPath: string): NextResponse {
+    return applyLegacyAdminApiDeprecationHeaders(response, { successorPath });
 }
 
-/**
- * GET /api/admin/config
- * Return masked (never real) token values for display in the settings UI.
- */
-export async function GET(_request: NextRequest) {
-    try {
-        const cookieStore = await cookies();
-        const token = cookieStore.get("admin_token");
+async function resolveOrganizationBySlug(slug: string): Promise<{ id: string; slug: string } | null> {
+    if (!slug) return null;
+    return prisma.organization.findUnique({
+        where: { slug },
+        select: { id: true, slug: true },
+    });
+}
 
-        if (!token || token.value !== "authenticated_true") {
-            return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+async function resolveLegacyConfigTarget(request: NextRequest): Promise<
+    { ok: true; value: LegacyConfigResolution }
+    | { ok: false; response: NextResponse }
+> {
+    const auth = await getAuthContextFromRequest(request);
+    if (!auth.isAuthenticated || !auth.userId || !auth.organizationId || !auth.organizationSlug || !auth.role) {
+        return {
+            ok: false,
+            response: withDeprecation(NextResponse.json({ error: "Unauthorized" }, { status: 401 }), "/api/agency/settings/meta"),
+        };
+    }
+
+    const requestedOrgSlug = new URL(request.url).searchParams.get("org")?.trim() ?? "";
+    const agencyOrgSlug = getAgencyOrgSlug();
+    const isAgencySession = auth.organizationSlug.toLowerCase() === agencyOrgSlug.toLowerCase();
+
+    if (isAgencySession) {
+        if (!hasRole(auth.role, "admin")) {
+            return {
+                ok: false,
+                response: withDeprecation(NextResponse.json({ error: "Forbidden" }, { status: 403 }), "/api/agency/settings/meta"),
+            };
         }
 
-        const settings = await (prisma as any).systemSetting.findMany();
+        if (!requestedOrgSlug) {
+            return {
+                ok: true,
+                value: {
+                    organizationId: auth.organizationId,
+                    successorPath: "/api/agency/settings/meta",
+                    actorUserId: auth.userId,
+                    actorScope: "agency",
+                },
+            };
+        }
 
-        // Return only masked values — never expose raw or decrypted tokens
-        const masked = settings.map((s: any) => ({
-            key: s.key,
-            masked: maskToken(s.value),
-            configured: !!s.value,
-        }));
+        const targetOrg = await resolveOrganizationBySlug(requestedOrgSlug);
+        if (!targetOrg) {
+            return {
+                ok: false,
+                response: withDeprecation(NextResponse.json({ error: "Organization not found" }, { status: 400 }), "/api/agency/settings/meta"),
+            };
+        }
 
-        return NextResponse.json({ settings: masked });
-    } catch (e: any) {
-        logger.error("Config GET error", { error: e?.message });
-        return NextResponse.json({ error: "Internal Error" }, { status: 500 });
+        return {
+            ok: true,
+            value: {
+                organizationId: targetOrg.id,
+                successorPath: `/api/org/${targetOrg.slug}/whatsapp/config/meta`,
+                actorUserId: auth.userId,
+                actorScope: "agency",
+            },
+        };
     }
+
+    if (auth.authScope !== "tenant") {
+        return {
+            ok: false,
+            response: withDeprecation(NextResponse.json({ error: "Forbidden" }, { status: 403 }), "/api/agency/settings/meta"),
+        };
+    }
+
+    if (!hasRole(auth.role, "admin")) {
+        return {
+            ok: false,
+            response: withDeprecation(
+                NextResponse.json({ error: "Forbidden" }, { status: 403 }),
+                `/api/org/${auth.organizationSlug}/whatsapp/config/meta`,
+            ),
+        };
+    }
+
+    if (requestedOrgSlug && requestedOrgSlug !== auth.organizationSlug) {
+        return {
+            ok: false,
+            response: withDeprecation(
+                NextResponse.json({ error: "Forbidden" }, { status: 403 }),
+                `/api/org/${auth.organizationSlug}/whatsapp/config/meta`,
+            ),
+        };
+    }
+
+    return {
+        ok: true,
+        value: {
+            organizationId: auth.organizationId,
+            successorPath: `/api/org/${auth.organizationSlug}/whatsapp/config/meta`,
+            actorUserId: auth.userId,
+            actorScope: "tenant",
+        },
+    };
+}
+
+export async function GET(request: NextRequest) {
+    const resolution = await resolveLegacyConfigTarget(request);
+    if (!resolution.ok) return resolution.response;
+
+    const redirectResponse = createLegacyAdminFinalRedirectResponse(request, {
+        successorPath: resolution.value.successorPath,
+    });
+    if (redirectResponse) return redirectResponse;
+
+    const settings = await listMaskedMetaSettings(resolution.value.organizationId);
+    return withDeprecation(
+        NextResponse.json({ settings }, { status: 200 }),
+        resolution.value.successorPath,
+    );
+}
+
+export async function POST(request: NextRequest) {
+    const resolution = await resolveLegacyConfigTarget(request);
+    if (!resolution.ok) return resolution.response;
+
+    const redirectResponse = createLegacyAdminFinalRedirectResponse(request, {
+        successorPath: resolution.value.successorPath,
+    });
+    if (redirectResponse) return redirectResponse;
+
+    const frozen = createLegacyAdminWriteFrozenResponse({ successorPath: resolution.value.successorPath });
+    if (frozen) return frozen;
+
+    const body = await request.json().catch(() => null);
+    const parsed = sanitizeMetaSettingInputs(body);
+    if (!parsed.ok) {
+        return withDeprecation(
+            NextResponse.json({ error: parsed.error }, { status: 400 }),
+            resolution.value.successorPath,
+        );
+    }
+
+    const result = await upsertMetaSettings(resolution.value.organizationId, parsed.settings);
+
+    await writeAuditEvent({
+        organizationId: resolution.value.organizationId,
+        action: "legacyAdminConfigUpdated",
+        details: {
+            keys: result.updatedKeys,
+            actorUserId: resolution.value.actorUserId,
+            actorScope: resolution.value.actorScope,
+            via: "/api/admin/config",
+        },
+        strict: false,
+        context: {
+            keys: result.updatedKeys.length,
+            actorScope: resolution.value.actorScope,
+        },
+    });
+
+    return withDeprecation(
+        NextResponse.json({ success: true, updatedKeys: result.updatedKeys }, { status: 200 }),
+        resolution.value.successorPath,
+    );
 }

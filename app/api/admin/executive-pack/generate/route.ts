@@ -1,63 +1,64 @@
-/**
- * app/api/admin/executive-pack/generate/route.ts
- * V24: POST — Generate an executive pack for an org.
- *
- * Body: { orgId: string; anonymized?: boolean }
- * RBAC: admin token
- */
-
 import { NextRequest, NextResponse } from "next/server";
-import { buildExecPack } from "@/lib/executive-pack/pack-builder";
-import { logger } from "@/lib/logger";
-import { nanoid } from "nanoid";
+import {
+    applyLegacyAdminApiDeprecationHeaders,
+    createLegacyAdminFinalRedirectResponse,
+    createLegacyAdminWriteFrozenResponse,
+    requireAdminApiAccess,
+} from "@/lib/auth/admin-api-guard";
+import { resolveTargetOrgId } from "@/lib/agency/target-org";
+import { generateExecutivePack } from "@/lib/agency/executive-pack/handlers";
 
 export const runtime = "nodejs";
 
-export async function POST(req: NextRequest) {
-    const adminToken = req.headers.get("x-admin-token");
-    if (!adminToken || adminToken !== process.env.ADMIN_SECRET_TOKEN) {
-        return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
+function respond(mode: "session" | "legacy_admin_token", body: unknown, init?: ResponseInit) {
+    return applyLegacyAdminApiDeprecationHeaders(NextResponse.json(body, init), {
+        successorPath: "/api/agency/executive-pack/generate",
+        mode,
+    });
+}
+
+export async function POST(request: NextRequest) {
+    const redirectResponse = createLegacyAdminFinalRedirectResponse(request, {
+        successorPath: "/api/agency/executive-pack/generate",
+    });
+    if (redirectResponse) return redirectResponse;
+
+    const access = await requireAdminApiAccess(request, {
+        requiredRole: "admin",
+        allowLegacyTokenFallback: false,
+    });
+    if (!access.ok) return NextResponse.json({ error: access.error }, { status: access.status });
+    if (!access.auth?.organizationId) return respond(access.mode, { error: "Forbidden" }, { status: 403 });
+
+    const frozen = createLegacyAdminWriteFrozenResponse({
+        successorPath: "/api/agency/executive-pack/generate",
+        mode: access.mode,
+    });
+    if (frozen) return frozen;
 
     let body: { orgId?: string; anonymized?: boolean };
-    try { body = await req.json(); }
-    catch { return NextResponse.json({ error: "Invalid JSON" }, { status: 400 }); }
+    try {
+        body = await request.json();
+    } catch {
+        return respond(access.mode, { error: "Invalid JSON" }, { status: 400 });
+    }
 
-    if (!body.orgId) return NextResponse.json({ error: "orgId required" }, { status: 400 });
-
-    logger.info("[ExecPack] Building pack", { orgId: body.orgId });
+    let orgId: string;
+    try {
+        orgId = await resolveTargetOrgId({
+            requestUrl: request.url,
+            defaultOrgId: access.auth.organizationId,
+            bodyOrgId: body.orgId,
+        });
+    } catch {
+        return respond(access.mode, { error: "Organization not found" }, { status: 404 });
+    }
 
     try {
-        const payload = await buildExecPack(body.orgId, body.anonymized ?? false);
-        const slug = nanoid(10);
-
-        const { prisma } = await import("@/lib/prisma");
-        const pack = await (prisma as any).execPack.create({
-            data: {
-                id: slug,
-                orgId: body.orgId,
-                publicSlug: slug,
-                status: "ready",
-                payloadJson: JSON.stringify(payload),
-                anonymized: body.anonymized ?? false,
-            },
-        });
-
-        // Audit
-        await (prisma as any).auditEvent.create({
-            data: {
-                assessmentId: "system",
-                organizationId: body.orgId,
-                action: "execPackGenerated",
-                details: JSON.stringify({ slug, anonymized: body.anonymized }),
-            },
-        }).catch(() => null);
-
-        logger.info("[ExecPack] Ready", { slug });
-        return NextResponse.json({ ok: true, id: slug, slug }, { status: 201 });
-
-    } catch (err: any) {
-        logger.error("[ExecPack] Failed", { err: err?.message });
-        return NextResponse.json({ error: "Generation failed", detail: err?.message }, { status: 500 });
+        const result = await generateExecutivePack({ orgId, anonymized: Boolean(body.anonymized) });
+        return respond(access.mode, result, { status: 201 });
+    } catch (error) {
+        const detail = error instanceof Error ? error.message : String(error);
+        return respond(access.mode, { error: "Generation failed", detail }, { status: 500 });
     }
 }

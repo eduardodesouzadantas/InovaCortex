@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 "use client";
 
 import { useState } from "react";
@@ -25,10 +26,12 @@ export function WorkspaceTaskBoard({
     tasks,
     workspaceId,
     canEdit,
+    apiBasePath = "/api/admin/workspaces",
 }: {
     tasks: Task[];
     workspaceId: string;
     canEdit: boolean;
+    apiBasePath?: string;
 }) {
     const [localTasks, setLocalTasks] = useState<Task[]>(tasks);
     const [loading, setLoading] = useState<Record<string, boolean>>({});
@@ -40,7 +43,7 @@ export function WorkspaceTaskBoard({
 
         setLoading(prev => ({ ...prev, [task.id]: true }));
         try {
-            const res = await fetch(`/api/admin/workspaces/${workspaceId}/tasks/${task.id}`, {
+            const res = await fetch(`${apiBasePath}/${workspaceId}/tasks/${task.id}`, {
                 method: "PATCH",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({ status: nextStatus }),

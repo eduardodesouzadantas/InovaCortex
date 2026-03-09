@@ -3,19 +3,23 @@
  * Helper for server-side auth and user context.
  */
 
-import { getSession } from "@/lib/auth/session";
+import { getAuthContext, type AuthContext } from "@/lib/auth/session";
 import { prisma } from "@/lib/prisma";
+
+export async function getCurrentAuthContext(): Promise<AuthContext> {
+    return getAuthContext();
+}
 
 /**
  * Get the current authenticated user from session cookie.
  * Includes organization context.
  */
 export async function getCurrentUser() {
-    const session = await getSession();
-    if (!session) return null;
+    const auth = await getCurrentAuthContext();
+    if (!auth.isAuthenticated || !auth.userId) return null;
 
-    return await (prisma as any).user.findUnique({
-        where: { id: session.userId },
+    return await prisma.user.findUnique({
+        where: { id: auth.userId },
         include: { organization: true },
     }).catch(() => null);
 }

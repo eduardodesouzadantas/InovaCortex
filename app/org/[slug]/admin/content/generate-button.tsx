@@ -8,15 +8,19 @@ const CONTENT_TYPES = [
     { value: "instagram", label: "Post Instagram", icon: Instagram },
     { value: "case_breakdown", label: "Case Breakdown", icon: FileText },
     { value: "authority_thread", label: "Thread", icon: MessageSquare },
-    { value: "video_script", label: "Roteiro de Vídeo", icon: Video },
+    { value: "video_script", label: "Roteiro de Video", icon: Video },
 ] as const;
 
 export function ContentGenerateButton({
     assessments,
     orgSlug,
+    apiBasePath = "/api/admin/content",
+    detailBasePath,
 }: {
     assessments: { id: string; company: string; scoreTotal: number }[];
-    orgSlug: string;
+    orgSlug?: string;
+    apiBasePath?: string;
+    detailBasePath?: string;
 }) {
     const [open, setOpen] = useState(false);
     const [type, setType] = useState<string>("linkedin");
@@ -24,86 +28,109 @@ export function ContentGenerateButton({
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState<string>();
 
+    const resolvedDetailBasePath = detailBasePath ?? (orgSlug ? `/org/${orgSlug}/admin/content` : "/agency/content");
+
+    const getErrorMessage = (error: unknown): string => {
+        if (error instanceof Error) return error.message;
+        return "Falha na geracao";
+    };
+
     const handleGenerate = async () => {
         setLoading(true);
         setError(undefined);
         try {
-            const res = await fetch("/api/admin/content", {
+            const res = await fetch(apiBasePath, {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({ type, assessmentId: assessmentId || undefined }),
             });
             const data = await res.json();
-            if (!res.ok) throw new Error(data.error ?? "Falha na geração");
+            if (!res.ok) throw new Error(data.error ?? "Falha na geracao");
 
-            // Redirect to detail page
-            window.location.href = `/org/${orgSlug}/admin/content/${data.artifact.id}`;
-        } catch (e: any) {
-            setError(e.message);
+            window.location.href = `${resolvedDetailBasePath}/${data.artifact.id}`;
+        } catch (error: unknown) {
+            setError(getErrorMessage(error));
             setLoading(false);
         }
     };
 
     return (
         <>
-            <button onClick={() => setOpen(true)}
-                className="btn-primary flex items-center gap-2 text-sm">
-                <Plus className="w-4 h-4" /> Gerar Conteúdo
+            <button onClick={() => setOpen(true)} className="btn-primary flex items-center gap-2 text-sm">
+                <Plus className="w-4 h-4" /> Gerar Conteudo
             </button>
 
             {open && (
-                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
-                    <div className="glass-panel rounded-2xl border border-border/60 p-6 w-full max-w-md space-y-5">
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm">
+                    <div className="glass-panel w-full max-w-md space-y-5 rounded-2xl border border-border/60 p-6">
                         <div>
-                            <h2 className="font-bold text-lg">Gerar Conteúdo</h2>
-                            <p className="text-xs text-muted-foreground mt-1">Selecione o tipo e a origem dos dados</p>
+                            <h2 className="text-lg font-bold">Gerar Conteudo</h2>
+                            <p className="mt-1 text-xs text-muted-foreground">Selecione o tipo e a origem dos dados</p>
                         </div>
 
-                        {/* Type picker */}
                         <div>
-                            <label className="text-xs text-muted-foreground block mb-2">Tipo de conteúdo</label>
+                            <label className="mb-2 block text-xs text-muted-foreground">Tipo de conteudo</label>
                             <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
-                                {CONTENT_TYPES.map(t => {
-                                    const Icon = t.icon;
+                                {CONTENT_TYPES.map((contentType) => {
+                                    const Icon = contentType.icon;
                                     return (
-                                        <button key={t.value} onClick={() => setType(t.value)}
-                                            className={`flex items-center gap-2 px-3 py-2 rounded-lg border text-xs transition-all ${type === t.value ? "border-primary bg-primary/15 text-primary" : "border-border/40 text-muted-foreground hover:border-border"}`}>
-                                            <Icon className="w-3.5 h-3.5 shrink-0" /> {t.label}
+                                        <button
+                                            key={contentType.value}
+                                            onClick={() => setType(contentType.value)}
+                                            className={`flex items-center gap-2 rounded-lg border px-3 py-2 text-xs transition-all ${
+                                                type === contentType.value
+                                                    ? "border-primary bg-primary/15 text-primary"
+                                                    : "border-border/40 text-muted-foreground hover:border-border"
+                                            }`}
+                                        >
+                                            <Icon className="h-3.5 w-3.5 shrink-0" /> {contentType.label}
                                         </button>
                                     );
                                 })}
                             </div>
                         </div>
 
-                        {/* Assessment picker (optional) */}
                         <div>
-                            <label className="text-xs text-muted-foreground block mb-2">Lead de origem (opcional)</label>
-                            <select value={assessmentId} onChange={e => setAssessmentId(e.target.value)}
-                                className="w-full h-9 px-3 rounded-lg border border-border bg-muted/20 text-sm">
-                                <option value="">Cenário genérico</option>
-                                {assessments.map(a => (
-                                    <option key={a.id} value={a.id}>
-                                        {a.company} ({a.scoreTotal}pts)
+                            <label className="mb-2 block text-xs text-muted-foreground">Lead de origem (opcional)</label>
+                            <select
+                                value={assessmentId}
+                                onChange={(e) => setAssessmentId(e.target.value)}
+                                className="h-9 w-full rounded-lg border border-border bg-muted/20 px-3 text-sm"
+                            >
+                                <option value="">Cenario generico</option>
+                                {assessments.map((assessment) => (
+                                    <option key={assessment.id} value={assessment.id}>
+                                        {assessment.company} ({assessment.scoreTotal}pts)
                                     </option>
                                 ))}
                             </select>
-                            <p className="text-xs text-muted-foreground/60 mt-1">
-                                Com lead: usa dados reais da empresa. Sem lead: usa cenário realista.
+                            <p className="mt-1 text-xs text-muted-foreground/60">
+                                Com lead: usa dados reais da empresa. Sem lead: usa cenario realista.
                             </p>
                         </div>
 
                         {error && (
-                            <p className="text-sm text-red-400 bg-red-400/10 border border-red-400/20 rounded-lg px-3 py-2">
+                            <p className="rounded-lg border border-red-400/20 bg-red-400/10 px-3 py-2 text-sm text-red-400">
                                 {error}
                             </p>
                         )}
 
                         <div className="flex gap-3">
-                            <button onClick={() => setOpen(false)}
-                                className="flex-1 btn-secondary text-sm">Cancelar</button>
-                            <button onClick={handleGenerate} disabled={loading}
-                                className="flex-1 btn-primary flex items-center justify-center gap-2 text-sm">
-                                {loading ? <><Loader2 className="w-4 h-4 animate-spin" /> Gerando...</> : "Gerar →"}
+                            <button onClick={() => setOpen(false)} className="btn-secondary flex-1 text-sm">
+                                Cancelar
+                            </button>
+                            <button
+                                onClick={handleGenerate}
+                                disabled={loading}
+                                className="btn-primary flex flex-1 items-center justify-center gap-2 text-sm"
+                            >
+                                {loading ? (
+                                    <>
+                                        <Loader2 className="h-4 w-4 animate-spin" /> Gerando...
+                                    </>
+                                ) : (
+                                    "Gerar ->"
+                                )}
                             </button>
                         </div>
                     </div>

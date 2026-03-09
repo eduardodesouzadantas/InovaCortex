@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 "use client";
 
 import { useState } from "react";
@@ -25,6 +26,7 @@ interface BillingPanelProps {
         createdAt: string;
     } | null;
     proposalId: string;
+    apiBasePath?: string;
 }
 
 // ─── Status helpers ────────────────────────────────────────────────────────────
@@ -65,19 +67,22 @@ function ContractBadge({ status }: { status: string }) {
 
 // ─── Main Component ───────────────────────────────────────────────────────────
 
-export function BillingPanel({ billing, contract, proposalId }: BillingPanelProps) {
+export function BillingPanel({
+    billing,
+    contract,
+    proposalId,
+    apiBasePath = "/api/admin",
+}: BillingPanelProps) {
     const [rechargeLoading, setRechargeLoading] = useState(false);
     const [onboardingLoading, setOnboardingLoading] = useState(false);
     const [feedback, setFeedback] = useState<{ type: "success" | "error"; msg: string } | null>(null);
-
-    const baseUrl = typeof window !== "undefined" ? window.location.origin : "";
 
     const handleResendCharge = async () => {
         if (!billing) return;
         setRechargeLoading(true);
         setFeedback(null);
         try {
-            const res = await fetch(`/api/admin/billing/${billing.id}/resend`, { method: "POST" });
+            const res = await fetch(`${apiBasePath}/billing/${billing.id}/resend`, { method: "POST" });
             const data = await res.json();
             if (!res.ok) throw new Error(data.error);
             setFeedback({ type: "success", msg: "Cobrança reenviada." });
@@ -92,7 +97,7 @@ export function BillingPanel({ billing, contract, proposalId }: BillingPanelProp
         setOnboardingLoading(true);
         setFeedback(null);
         try {
-            const res = await fetch(`/api/admin/billing/${billing?.id ?? proposalId}/resend-onboarding`, { method: "POST" });
+            const res = await fetch(`${apiBasePath}/billing/${billing?.id ?? proposalId}/resend-onboarding`, { method: "POST" });
             const data = await res.json();
             if (!res.ok) throw new Error(data.error);
             setFeedback({ type: "success", msg: "Onboarding reenviado." });

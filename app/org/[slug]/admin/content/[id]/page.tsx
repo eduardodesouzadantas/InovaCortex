@@ -1,13 +1,22 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 import { redirect, notFound } from "next/navigation";
 import { requireOrgContext } from "@/lib/auth/org-context";
 import { assertRole } from "@/lib/auth/rbac";
+import { getAuthContext } from "@/lib/auth/session";
 import { prisma } from "@/lib/prisma";
 import Link from "next/link";
 import { ContentStatusBadge } from "../status-badge";
 import { ContentReviewActions } from "./review-actions";
-import { ChevronLeft, Copy, ExternalLink } from "lucide-react";
+import { ChevronLeft, Copy } from "lucide-react";
 
 export const runtime = "nodejs";
+
+function isAgencyUiContentEnabled(): boolean {
+    const raw = process.env.FF_AGENCY_UI_CONTENT;
+    if (typeof raw === "undefined") return true;
+    const normalized = raw.trim().toLowerCase();
+    return normalized === "1" || normalized === "true" || normalized === "yes" || normalized === "on";
+}
 
 const TYPE_LABELS: Record<string, string> = {
     linkedin: "LinkedIn", instagram: "Instagram",
@@ -18,6 +27,11 @@ export default async function ContentDetailPage({
     params
 }: { params: Promise<{ slug: string; id: string }> }) {
     const { slug, id } = await params;
+
+    const auth = await getAuthContext();
+    if (isAgencyUiContentEnabled() && auth.isAuthenticated && auth.authScope === "agency") {
+        redirect(`/agency/content/${id}`);
+    }
 
     let ctx: Awaited<ReturnType<typeof requireOrgContext>>;
     try {
@@ -50,9 +64,6 @@ export default async function ContentDetailPage({
     })();
 
     const isAdmin = ["owner", "admin"].includes(ctx!.role);
-    const canPost = isAdmin && artifact.status === "approved";
-    const canReview = isAdmin && artifact.status === "draft";
-    const canApprove = isAdmin && artifact.status === "reviewed";
 
     return (
         <div className="min-h-screen bg-background">
@@ -86,7 +97,6 @@ export default async function ContentDetailPage({
                         <ContentReviewActions
                             artifactId={artifact.id}
                             status={artifact.status}
-                            orgSlug={slug}
                         />
                     )}
                 </div>

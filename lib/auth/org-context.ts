@@ -8,8 +8,7 @@
  */
 
 import { prisma } from "@/lib/prisma";
-import { getSession } from "@/lib/auth/session";
-import { SessionPayload } from "@/lib/auth/session";
+import { resolveAuthContext, getAuthContext, type SessionPayload } from "@/lib/auth/session";
 
 export interface OrgContext {
     orgId: string;
@@ -25,21 +24,23 @@ export interface OrgContext {
  * Returns OrgContext or throws "UNAUTHENTICATED" / "FORBIDDEN".
  */
 export async function requireOrgContext(orgSlug: string): Promise<OrgContext> {
-    const session = await getSession();
-    if (!session) throw new Error("UNAUTHENTICATED");
-    if (session.orgSlug !== orgSlug) throw new Error("FORBIDDEN");
+    const auth = await getAuthContext();
+    if (!auth.isAuthenticated || !auth.session) throw new Error("UNAUTHENTICATED");
+    if (auth.authScope !== "tenant") throw new Error("FORBIDDEN");
+    if (auth.organizationSlug !== orgSlug) throw new Error("FORBIDDEN");
+    if (!auth.organizationId || !auth.userId || !auth.role) throw new Error("FORBIDDEN");
 
-    const org = await (prisma as any).organization.findUnique({
+    const org = await prisma.organization.findUnique({
         where: { slug: orgSlug }
     });
     if (!org) throw new Error("ORG_NOT_FOUND");
-    if (org.id !== session.orgId) throw new Error("FORBIDDEN");
+    if (org.id !== auth.organizationId) throw new Error("FORBIDDEN");
 
     return {
         orgId: org.id,
         orgSlug: org.slug,
-        userId: session.userId,
-        role: session.role,
+        userId: auth.userId,
+        role: auth.role,
         plan: org.plan,
         maxAssessmentsPerMonth: org.maxAssessmentsPerMonth,
     };
@@ -50,16 +51,21 @@ export async function requireOrgContext(orgSlug: string): Promise<OrgContext> {
  * Used in API routes where slug is not in the URL.
  */
 export async function getOrgContextFromSession(session: SessionPayload): Promise<OrgContext> {
-    const org = await (prisma as any).organization.findUnique({
-        where: { id: session.orgId }
+    const auth = resolveAuthContext(session);
+    if (!auth.isAuthenticated || !auth.session) throw new Error("UNAUTHENTICATED");
+    if (auth.authScope !== "tenant") throw new Error("FORBIDDEN");
+    if (!auth.organizationId || !auth.userId || !auth.role) throw new Error("FORBIDDEN");
+
+    const org = await prisma.organization.findUnique({
+        where: { id: auth.organizationId }
     });
     if (!org) throw new Error("ORG_NOT_FOUND");
 
     return {
         orgId: org.id,
         orgSlug: org.slug,
-        userId: session.userId,
-        role: session.role,
+        userId: auth.userId,
+        role: auth.role,
         plan: org.plan,
         maxAssessmentsPerMonth: org.maxAssessmentsPerMonth,
     };
@@ -70,7 +76,7 @@ export async function getOrgContextFromSession(session: SessionPayload): Promise
  * Used to brand the page.
  */
 export async function getPublicOrgBySlug(orgSlug: string) {
-    return (prisma as any).organization.findUnique({
+    return prisma.organization.findUnique({
         where: { slug: orgSlug },
         select: { id: true, name: true, slug: true }
     });

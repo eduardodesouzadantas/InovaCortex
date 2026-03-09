@@ -1,72 +1,86 @@
 import { NextRequest, NextResponse } from "next/server";
-import { prisma } from "@/lib/prisma";
-import { getSession } from "@/lib/auth/session";
-import { recalculateMonthlySnapshot, currentMonth } from "@/lib/usage";
-import { logger } from "@/lib/logger";
+import {
+    applyLegacyAdminApiDeprecationHeaders,
+    createLegacyAdminFinalRedirectResponse,
+    createLegacyAdminWriteFrozenResponse,
+    requireAdminApiAccess,
+} from "@/lib/auth/admin-api-guard";
+import { resolveTargetOrgId } from "@/lib/agency/target-org";
+import { readUsageSnapshotOrLive, recalculateUsageSnapshot } from "@/lib/agency/costs/usage-handlers";
 
 export const runtime = "nodejs";
 
-/**
- * POST /api/admin/usage/recalculate?month=YYYY-MM
- * Recalculates and upserts the MonthlyUsageSnapshot for all orgs (or specific org).
- * Admin-only endpoint.
- */
+function respond(mode: "session" | "legacy_admin_token", body: unknown, init?: ResponseInit) {
+    return applyLegacyAdminApiDeprecationHeaders(NextResponse.json(body, init), {
+        successorPath: "/api/agency/costs/usage/recalculate",
+        mode,
+    });
+}
+
 export async function POST(request: NextRequest) {
-    const session = await getSession();
-    if (!session || !["owner", "admin"].includes(session.role)) {
-        return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    const redirectResponse = createLegacyAdminFinalRedirectResponse(request, {
+        successorPath: "/api/agency/costs/usage/recalculate",
+    });
+    if (redirectResponse) return redirectResponse;
+
+    const access = await requireAdminApiAccess(request, {
+        requiredRole: "admin",
+        allowLegacyTokenFallback: false,
+    });
+    if (!access.ok) return NextResponse.json({ error: access.error }, { status: access.status });
+    if (!access.auth?.organizationId) return respond(access.mode, { error: "Forbidden" }, { status: 403 });
+
+    const frozen = createLegacyAdminWriteFrozenResponse({
+        successorPath: "/api/agency/costs/usage/recalculate",
+        mode: access.mode,
+    });
+    if (frozen) return frozen;
+
+    const month = new URL(request.url).searchParams.get("month") ?? undefined;
+
+    let orgId: string;
+    try {
+        orgId = await resolveTargetOrgId({
+            requestUrl: request.url,
+            defaultOrgId: access.auth.organizationId,
+        });
+    } catch {
+        return respond(access.mode, { error: "Organization not found" }, { status: 404 });
     }
 
-    const { searchParams } = new URL(request.url);
-    const month = searchParams.get("month") ?? currentMonth();
-    const orgScope = searchParams.get("org") ?? session.orgId;
-
     try {
-        await recalculateMonthlySnapshot(orgScope, month);
-        logger.info("Monthly snapshot recalculated", { orgId: orgScope, month });
-
-        const snapshot = await (prisma as any).monthlyUsageSnapshot.findUnique({
-            where: { organizationId_month: { organizationId: orgScope, month } }
-        });
-
-        return NextResponse.json({ success: true, month, snapshot });
-    } catch (err) {
-        logger.error("Failed to recalculate snapshot", { error: String(err) });
-        return NextResponse.json({ error: "Failed" }, { status: 500 });
+        const result = await recalculateUsageSnapshot({ orgId, month });
+        return respond(access.mode, result);
+    } catch {
+        return respond(access.mode, { error: "Failed" }, { status: 500 });
     }
 }
 
-/**
- * GET /api/admin/usage/recalculate
- * Returns current month snapshot or live event counts.
- */
 export async function GET(request: NextRequest) {
-    const session = await getSession();
-    if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-
-    const { searchParams } = new URL(request.url);
-    const month = searchParams.get("month") ?? currentMonth();
-    const orgId = session.orgId;
-
-    const snapshot = await (prisma as any).monthlyUsageSnapshot.findUnique({
-        where: { organizationId_month: { organizationId: orgId, month } }
+    const redirectResponse = createLegacyAdminFinalRedirectResponse(request, {
+        successorPath: "/api/agency/costs/usage/recalculate",
     });
+    if (redirectResponse) return redirectResponse;
 
-    // Fall back to live counts if snapshot not yet generated
-    const startOfMonth = new Date(month + "-01T00:00:00.000Z");
-    const endOfMonth = new Date(startOfMonth);
-    endOfMonth.setUTCMonth(endOfMonth.getUTCMonth() + 1);
-
-    const live = await (prisma as any).usageEvent.groupBy({
-        by: ["type"],
-        where: { organizationId: orgId, createdAt: { gte: startOfMonth, lt: endOfMonth } },
-        _sum: { quantity: true },
+    const access = await requireAdminApiAccess(request, {
+        requiredRole: "admin",
+        allowLegacyTokenFallback: false,
     });
+    if (!access.ok) return NextResponse.json({ error: access.error }, { status: access.status });
+    if (!access.auth?.organizationId) return respond(access.mode, { error: "Forbidden" }, { status: 403 });
 
-    const liveCounts: Record<string, number> = {};
-    for (const row of live) {
-        liveCounts[row.type] = row._sum.quantity ?? 0;
+    const month = new URL(request.url).searchParams.get("month") ?? undefined;
+
+    let orgId: string;
+    try {
+        orgId = await resolveTargetOrgId({
+            requestUrl: request.url,
+            defaultOrgId: access.auth.organizationId,
+        });
+    } catch {
+        return respond(access.mode, { error: "Organization not found" }, { status: 404 });
     }
 
-    return NextResponse.json({ month, snapshot, liveCounts });
+    const result = await readUsageSnapshotOrLive({ orgId, month });
+    return respond(access.mode, result);
 }

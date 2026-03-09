@@ -1,53 +1,56 @@
-/**
- * app/api/admin/orchestrator/scan-profit-leaks/route.ts
- * V22.1: POST — Trigger a profit leak scan for an org.
- *
- * RBAC: admin only (adminToken header or session).
- * Idempotent: safe to call multiple times per day.
- */
-
 import { NextRequest, NextResponse } from "next/server";
-import { getSession } from "@/lib/auth/session";
-import { executeProfitLeakScan } from "@/lib/orchestrator/executors/profit-leak-executor";
-import { logger } from "@/lib/logger";
+import {
+    applyLegacyAdminApiDeprecationHeaders,
+    createLegacyAdminFinalRedirectResponse,
+    createLegacyAdminWriteFrozenResponse,
+    requireAdminApiAccess,
+} from "@/lib/auth/admin-api-guard";
+import { resolveTargetOrgId } from "@/lib/agency/target-org";
+import { scanOrgProfitLeaks } from "@/lib/agency/monitoring/orchestrator-handlers";
 
-export async function POST(req: NextRequest) {
-    // ── Auth ──────────────────────────────────────────────────────────────────
-    const session = await getSession();
-    const adminToken = req.headers.get("x-admin-token");
-    const envToken = process.env.ADMIN_SECRET_TOKEN;
-
-    const isAuthed =
-        (session != null && (session.role === "admin" || session.role === "owner")) ||
-        (envToken && adminToken === envToken);
-
-    if (!isAuthed) {
-        return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
-
-    // ── Body ──────────────────────────────────────────────────────────────────
-    let body: { orgId?: string };
-    try { body = await req.json(); }
-    catch { return NextResponse.json({ error: "Invalid JSON" }, { status: 400 }); }
-
-    if (!body.orgId) {
-        return NextResponse.json({ error: "orgId required" }, { status: 400 });
-    }
-
-    // ── Execute ───────────────────────────────────────────────────────────────
-    logger.info("[ScanProfitLeaks] Starting", { orgId: body.orgId });
-
-    const result = await executeProfitLeakScan({ orgId: body.orgId });
-
-    if (!result.success) {
-        return NextResponse.json({ error: "Scan failed" }, { status: 500 });
-    }
-
-    return NextResponse.json({
-        ok: true,
-        leaksCreated: result.leaksCreated,
-        leaksUpdated: result.leaksUpdated,
-        snapshot: result.snapshot,
-        scannedAt: new Date().toISOString(),
+function respond(mode: "session" | "legacy_admin_token", body: unknown, init?: ResponseInit) {
+    return applyLegacyAdminApiDeprecationHeaders(NextResponse.json(body, init), {
+        successorPath: "/api/agency/monitoring/orchestrator/scan-profit-leaks",
+        mode,
     });
+}
+
+export async function POST(request: NextRequest) {
+    const redirectResponse = createLegacyAdminFinalRedirectResponse(request, {
+        successorPath: "/api/agency/monitoring/orchestrator/scan-profit-leaks",
+    });
+    if (redirectResponse) return redirectResponse;
+
+    const access = await requireAdminApiAccess(request, {
+        requiredRole: "admin",
+        allowLegacyTokenFallback: false,
+    });
+    if (!access.ok) return NextResponse.json({ error: access.error }, { status: access.status });
+    if (!access.auth?.organizationId) return respond(access.mode, { error: "Forbidden" }, { status: 403 });
+
+    const frozen = createLegacyAdminWriteFrozenResponse({
+        successorPath: "/api/agency/monitoring/orchestrator/scan-profit-leaks",
+        mode: access.mode,
+    });
+    if (frozen) return frozen;
+
+    const body = await request.json().catch(() => ({} as { orgId?: string }));
+
+    let orgId: string;
+    try {
+        orgId = await resolveTargetOrgId({
+            requestUrl: request.url,
+            defaultOrgId: access.auth.organizationId,
+            bodyOrgId: body.orgId,
+        });
+    } catch {
+        return respond(access.mode, { error: "Organization not found" }, { status: 404 });
+    }
+
+    try {
+        const result = await scanOrgProfitLeaks(orgId);
+        return respond(access.mode, result);
+    } catch {
+        return respond(access.mode, { error: "Scan failed" }, { status: 500 });
+    }
 }

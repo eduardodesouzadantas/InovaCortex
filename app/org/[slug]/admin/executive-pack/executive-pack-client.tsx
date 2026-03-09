@@ -280,10 +280,7 @@ export function ExecutivePackClient({ orgSlug, orgId }: { orgSlug: string; orgId
         try {
             const res = await fetch("/api/admin/executive-pack/generate", {
                 method: "POST",
-                headers: {
-                    "Content-Type": "application/json",
-                    "x-admin-token": process.env.NEXT_PUBLIC_ADMIN_TOKEN ?? "",
-                },
+                headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({ orgId, anonymized }),
             });
             const data = await res.json();

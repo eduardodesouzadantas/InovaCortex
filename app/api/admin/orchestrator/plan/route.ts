@@ -1,42 +1,59 @@
-import { NextResponse } from "next/server";
-import { getSession } from "@/lib/auth/session";
-import { Orchestrator } from "@/lib/orchestrator/orchestrator";
-import { can } from "@/lib/auth/rbac";
-import { prisma } from "@/lib/prisma";
+import { NextRequest, NextResponse } from "next/server";
+import {
+    applyLegacyAdminApiDeprecationHeaders,
+    createLegacyAdminFinalRedirectResponse,
+    createLegacyAdminWriteFrozenResponse,
+    requireAdminApiAccess,
+} from "@/lib/auth/admin-api-guard";
+import { resolveTargetOrgId } from "@/lib/agency/target-org";
+import { planOrchestratorActions } from "@/lib/agency/monitoring/orchestrator-handlers";
 
-export async function POST(req: Request) {
-    try {
-        const session = await getSession();
-        if (!session || !can(session.role, "manageSettings")) {
-            return new NextResponse("Unauthorized", { status: 401 });
-        }
+function respond(mode: "session" | "legacy_admin_token", body: unknown, init?: ResponseInit) {
+    return applyLegacyAdminApiDeprecationHeaders(NextResponse.json(body, init), {
+        successorPath: "/api/agency/monitoring/orchestrator/plan",
+        mode,
+    });
+}
 
-        const body = await req.json();
-        const { previewOnly } = body;
+export async function POST(request: NextRequest) {
+    const redirectResponse = createLegacyAdminFinalRedirectResponse(request, {
+        successorPath: "/api/agency/monitoring/orchestrator/plan",
+    });
+    if (redirectResponse) return redirectResponse;
 
-        // Fetch context
-        const recentLeads = await (prisma as any).assessment.findMany({
-            where: { organizationId: session.orgId },
-            orderBy: { createdAt: "desc" },
-            take: 5
-        });
-
-        const ctx = {
-            orgId: session.orgId,
-            userId: session.userId,
-            recentLeads
-        };
-
-        const plannedActions = await Orchestrator.plan(ctx);
-
-        if (!previewOnly) {
-            for (const action of plannedActions) {
-                await Orchestrator.enqueue(action, ctx);
-            }
-        }
-
-        return NextResponse.json({ success: true, count: plannedActions.length, actions: plannedActions });
-    } catch (e: any) {
-        return NextResponse.json({ error: e.message }, { status: 500 });
+    const access = await requireAdminApiAccess(request, {
+        requiredRole: "admin",
+        allowLegacyTokenFallback: false,
+    });
+    if (!access.ok) return NextResponse.json({ error: access.error }, { status: access.status });
+    if (!access.auth?.organizationId || !access.auth.userId) {
+        return respond(access.mode, { error: "Forbidden" }, { status: 403 });
     }
+
+    const frozen = createLegacyAdminWriteFrozenResponse({
+        successorPath: "/api/agency/monitoring/orchestrator/plan",
+        mode: access.mode,
+    });
+    if (frozen) return frozen;
+
+    const body = await request.json().catch(() => ({} as { previewOnly?: boolean; orgId?: string }));
+
+    let orgId: string;
+    try {
+        orgId = await resolveTargetOrgId({
+            requestUrl: request.url,
+            defaultOrgId: access.auth.organizationId,
+            bodyOrgId: body.orgId,
+        });
+    } catch {
+        return respond(access.mode, { error: "Organization not found" }, { status: 404 });
+    }
+
+    const result = await planOrchestratorActions({
+        orgId,
+        userId: access.auth.userId,
+        previewOnly: Boolean(body.previewOnly),
+    });
+
+    return respond(access.mode, result);
 }

@@ -1,31 +1,39 @@
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import { getOrgContextFromSession } from "@/lib/auth/org-context";
 import { getSessionFromRequest } from "@/lib/auth/session";
 import { assertRole } from "@/lib/auth/rbac";
-import { prisma } from "@/lib/prisma";
+import {
+    applyLegacyAdminApiDeprecationHeaders,
+    createLegacyAdminFinalRedirectResponse,
+    createLegacyAdminWriteFrozenResponse,
+} from "@/lib/auth/admin-api-guard";
+import { runWorkspaceNudgeHandler } from "@/lib/agency/commercial/workspaces";
 
 export const runtime = "nodejs";
 
-export async function POST(req: Request) {
+export async function POST(req: NextRequest) {
     try {
-        const session = await getSessionFromRequest(req as any);
+        const redirectResponse = createLegacyAdminFinalRedirectResponse(req, {
+            successorPath: "/api/agency/commercial/workspaces/nudge",
+        });
+        if (redirectResponse) return redirectResponse;
+
+        const session = await getSessionFromRequest(req);
         if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
         const ctx = await getOrgContextFromSession(session);
         assertRole(ctx.role, "admin");
 
-        // Stub action
-        await (prisma as any).auditEvent.create({
-            data: {
-                assessmentId: "system", organizationId: ctx.orgId, action: "workspaceNudgeAll",
-                details: JSON.stringify({ by: ctx.userId }),
-            }
-        }).catch(() => null);
+        const frozen = createLegacyAdminWriteFrozenResponse({
+            successorPath: "/api/agency/commercial/workspaces/nudge",
+        });
+        if (frozen) return frozen;
 
-        await new Promise(r => setTimeout(r, 800));
-
-        return NextResponse.json({ success: true });
-    } catch (e: any) {
-        return NextResponse.json({ error: "Falha na ação" }, { status: 500 });
+        const response = await runWorkspaceNudgeHandler(ctx.orgId, ctx.userId);
+        return applyLegacyAdminApiDeprecationHeaders(response, {
+            successorPath: "/api/agency/commercial/workspaces/nudge",
+        });
+    } catch {
+        return NextResponse.json({ error: "Falha na acao" }, { status: 500 });
     }
 }

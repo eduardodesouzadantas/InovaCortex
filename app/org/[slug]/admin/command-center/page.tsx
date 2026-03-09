@@ -1,15 +1,17 @@
-"use client";
-
-/**
- * app/org/[slug]/admin/command-center/page.tsx
- * CEO Command Center — Ultra-Premium Executive Dashboard
- *
- * Stack: Next.js 14 + TypeScript + TailwindCSS + Framer Motion + Recharts
- * Design: Dark mode, gold accents (#d4af37), glassmorphism, smooth animations
- */
-
+import { redirect } from "next/navigation";
+import { getAuthContext } from "@/lib/auth/session";
+import { isAgencyMonitoringNamespaceEnabled } from "@/lib/agency/monitoring/flag";
 import { CommandCenter } from "./command-center-client";
 
-export default function CommandCenterPage({ params }: { params: { slug: string } }) {
+export default async function CommandCenterPage({ params }: { params: { slug: string } }) {
+    const auth = await getAuthContext();
+    if (
+        isAgencyMonitoringNamespaceEnabled()
+        && auth.isAuthenticated
+        && auth.authScope === "agency"
+    ) {
+        redirect("/agency/command-center");
+    }
+
     return <CommandCenter orgSlug={params.slug} />;
 }

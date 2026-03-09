@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 "use client";
 
 import { useState, useId } from "react";
@@ -9,7 +10,15 @@ export type PipelineStatus = "Novo" | "Qualificado" | "Contatado" | "Agendado" |
 
 const STATUSES: PipelineStatus[] = ["Novo", "Qualificado", "Contatado", "Agendado", "Fechado", "Perdido"];
 
-export function KanbanBoard({ initialLeads }: { initialLeads: any[] }) {
+export function KanbanBoard({
+    initialLeads,
+    apiBasePath = "/api/admin/leads",
+    leadBasePath = "/admin",
+}: {
+    initialLeads: any[];
+    apiBasePath?: string;
+    leadBasePath?: string;
+}) {
     const [leads, setLeads] = useState(initialLeads);
 
     const handleDragEnd = async (event: DragEndEvent) => {
@@ -30,7 +39,7 @@ export function KanbanBoard({ initialLeads }: { initialLeads: any[] }) {
 
         // Fetch to backend
         try {
-            await fetch(`/api/admin/leads/${leadId}`, {
+            await fetch(`${apiBasePath}/${leadId}`, {
                 method: 'PATCH',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ status: newStatus })
@@ -52,7 +61,7 @@ export function KanbanBoard({ initialLeads }: { initialLeads: any[] }) {
                         <div key={status} className="snap-start">
                             <KanbanColumn id={status} title={status} count={columnLeads.length}>
                                 {columnLeads.map(lead => (
-                                    <DraggableCard key={lead.id} lead={lead} />
+                                    <DraggableCard key={lead.id} lead={lead} leadBasePath={leadBasePath} />
                                 ))}
                             </KanbanColumn>
                         </div>
@@ -65,7 +74,7 @@ export function KanbanBoard({ initialLeads }: { initialLeads: any[] }) {
 
 // Wrapper to make KanbanCard draggable
 import { useDraggable } from "@dnd-kit/core";
-function DraggableCard({ lead }: { lead: any }) {
+function DraggableCard({ lead, leadBasePath }: { lead: any; leadBasePath: string }) {
     const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({
         id: lead.id,
     });
@@ -78,7 +87,7 @@ function DraggableCard({ lead }: { lead: any }) {
 
     return (
         <div ref={setNodeRef} style={style} {...listeners} {...attributes} className="cursor-grab active:cursor-grabbing pb-2">
-            <KanbanCard lead={lead} />
+            <KanbanCard lead={lead} leadBasePath={leadBasePath} />
         </div>
     );
 }

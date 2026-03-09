@@ -15,7 +15,7 @@
  *   - Templates     (library + new version + edit)
  */
 
-import { useState, useCallback, useEffect, useRef } from "react";
+import { useState, useCallback, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 
 // ─── Design tokens ─────────────────────────────────────────────────────────────
@@ -79,7 +79,10 @@ interface PreflightCheck {
     blocking: boolean;
 }
 
-interface Props { orgSlug: string }
+interface Props {
+    orgSlug: string;
+    apiBasePath?: string;
+}
 
 // ─── Helpers ───────────────────────────────────────────────────────────────────
 function Glass({ children, className = "", style = {} }: { children: React.ReactNode; className?: string; style?: React.CSSProperties }) {
@@ -147,7 +150,7 @@ function SectionLabel({ text }: { text: string }) {
 }
 
 // ─── 1) Create Run Form ────────────────────────────────────────────────────────
-function CreateRunForm({ orgSlug, onCreated }: { orgSlug: string; onCreated: () => void }) {
+function CreateRunForm({ apiBasePath, onCreated }: { apiBasePath: string; onCreated: () => void }) {
     const [mode, setMode] = useState("prompt_pack");
     const [target, setTarget] = useState("");
     const [input, setInput] = useState(
@@ -165,9 +168,9 @@ function CreateRunForm({ orgSlug, onCreated }: { orgSlug: string; onCreated: () 
     async function submit() {
         setLoading(true); setError(null);
         try {
-            const res = await fetch(`/api/org/${orgSlug}/builder/run`, {
+            const res = await fetch(`${apiBasePath}/run`, {
                 method: "POST",
-                headers: { "Content-Type": "application/json", "x-builder-role": "admin" },
+                headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({ mode, inputJson: input, targetOrgSlug: target || undefined }),
             });
             if (!res.ok) { setError((await res.json()).error); return; }
@@ -424,7 +427,7 @@ function PromptPackTimeline({ artifacts }: { artifacts: BuildArtifact[] }) {
 }
 
 // ─── 4) Review Gate (Approve / Reject) ───────────────────────────────────────
-function ReviewGate({ run, orgSlug, onRefresh }: { run: BuildRun; orgSlug: string; onRefresh: () => void }) {
+function ReviewGate({ run, apiBasePath, onRefresh }: { run: BuildRun; apiBasePath: string; onRefresh: () => void }) {
     const [rejecting, setRejecting] = useState(false);
     const [reason, setReason] = useState("");
     const [busy, setBusy] = useState(false);
@@ -434,8 +437,8 @@ function ReviewGate({ run, orgSlug, onRefresh }: { run: BuildRun; orgSlug: strin
 
     async function approve() {
         setBusy(true); setMsg(null);
-        const res = await fetch(`/api/org/${orgSlug}/builder/run/${run.id}/approve`, {
-            method: "POST", headers: { "x-builder-role": "admin" },
+        const res = await fetch(`${apiBasePath}/run/${run.id}/approve`, {
+            method: "POST",
         });
         const d = await res.json();
         setMsg({ text: res.ok ? "✅ Aprovado com sucesso" : d.error, ok: res.ok });
@@ -445,9 +448,9 @@ function ReviewGate({ run, orgSlug, onRefresh }: { run: BuildRun; orgSlug: strin
 
     async function reject() {
         setBusy(true); setMsg(null);
-        const res = await fetch(`/api/org/${orgSlug}/builder/run/${run.id}/reject`, {
+        const res = await fetch(`${apiBasePath}/run/${run.id}/reject`, {
             method: "POST",
-            headers: { "Content-Type": "application/json", "x-builder-role": "admin" },
+            headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ reason }),
         });
         const d = await res.json();
@@ -562,23 +565,33 @@ function AuditTrail({ run }: { run: BuildRun }) {
 }
 
 // ─── Run Detail View ──────────────────────────────────────────────────────────
-function RunDetail({ run, orgSlug, onRefresh, onClose }: { run: BuildRun; orgSlug: string; onRefresh: () => void; onClose: () => void }) {
+function RunDetail({
+    run,
+    apiBasePath,
+    onRefresh,
+    onClose,
+}: {
+    run: BuildRun;
+    apiBasePath: string;
+    onRefresh: () => void;
+    onClose: () => void;
+}) {
     const [generating, setGenerating] = useState(false);
     const [transitioning, setTransitioning] = useState(false);
 
     async function generate() {
         setGenerating(true);
-        await fetch(`/api/org/${orgSlug}/builder/run/${run.id}/generate`, {
-            method: "POST", headers: { "x-builder-role": "admin" },
+        await fetch(`${apiBasePath}/run/${run.id}/generate`, {
+            method: "POST",
         });
         setGenerating(false); onRefresh();
     }
 
     async function transition(to: string) {
         setTransitioning(true);
-        await fetch(`/api/org/${orgSlug}/builder/run/${run.id}`, {
+        await fetch(`${apiBasePath}/run/${run.id}`, {
             method: "PATCH",
-            headers: { "Content-Type": "application/json", "x-builder-role": "admin" },
+            headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ status: to }),
         });
         setTransitioning(false); onRefresh();
@@ -643,7 +656,7 @@ function RunDetail({ run, orgSlug, onRefresh, onClose }: { run: BuildRun; orgSlu
             </div>
 
             {/* Section 4: Review Gate */}
-            <ReviewGate run={run} orgSlug={orgSlug} onRefresh={onRefresh} />
+            <ReviewGate run={run} apiBasePath={apiBasePath} onRefresh={onRefresh} />
 
             {/* Section 2: Blueprint */}
             {blueprintJson && <BlueprintViewer json={blueprintJson} />}
@@ -725,7 +738,7 @@ function RunList({ runs, onSelect }: { runs: BuildRun[]; onSelect: (r: BuildRun)
 }
 
 // ─── Template Library ─────────────────────────────────────────────────────────
-function TemplateLibrary({ orgSlug }: { orgSlug: string }) {
+function TemplateLibrary({ apiBasePath }: { apiBasePath: string }) {
     const [templates, setTemplates] = useState<BuildTemplate[]>([]);
     const [loaded, setLoaded] = useState(false);
     const [editing, setEditing] = useState<BuildTemplate | null>(null);
@@ -738,10 +751,10 @@ function TemplateLibrary({ orgSlug }: { orgSlug: string }) {
     const [msg, setMsg] = useState<string | null>(null);
 
     const load = useCallback(async () => {
-        const res = await fetch(`/api/org/${orgSlug}/builder/templates`, { headers: { "x-builder-role": "admin" } });
+        const res = await fetch(`${apiBasePath}/templates`);
         const data = await res.json();
         setTemplates(data.templates ?? []); setLoaded(true);
-    }, [orgSlug]);
+    }, [apiBasePath]);
 
     useEffect(() => { load(); }, [load]);
 
@@ -750,9 +763,9 @@ function TemplateLibrary({ orgSlug }: { orgSlug: string }) {
         const body = editing
             ? { key: editing.key, name: editing.name, description: editing.description, blueprintJson: newBlue }
             : { key: newKey, name: newName, description: newDesc, blueprintJson: newBlue };
-        const res = await fetch(`/api/org/${orgSlug}/builder/templates`, {
+        const res = await fetch(`${apiBasePath}/templates`, {
             method: "PATCH",
-            headers: { "Content-Type": "application/json", "x-builder-role": "admin" },
+            headers: { "Content-Type": "application/json" },
             body: JSON.stringify(body),
         });
         setSaving(false);
@@ -862,7 +875,8 @@ function StatsBar({ runs }: { runs: BuildRun[] }) {
 }
 
 // ─── Main BuilderClient ───────────────────────────────────────────────────────
-export function BuilderClient({ orgSlug }: Props) {
+export function BuilderClient({ orgSlug, apiBasePath }: Props) {
+    const apiBase = apiBasePath ?? `/api/org/${orgSlug}/builder`;
     const [tab, setTab] = useState<"runs" | "templates">("runs");
     const [runs, setRuns] = useState<BuildRun[]>([]);
     const [loading, setLoading] = useState(false);
@@ -871,14 +885,14 @@ export function BuilderClient({ orgSlug }: Props) {
 
     const loadRuns = useCallback(async () => {
         setLoading(true);
-        const res = await fetch(`/api/org/${orgSlug}/builder/run`, { headers: { "x-builder-role": "admin" } });
+        const res = await fetch(`${apiBase}/run`);
         const data = await res.json();
         // After refreshing, update selected run too
         const freshRuns: BuildRun[] = data.runs ?? [];
         setRuns(freshRuns);
         if (sel) setSel(freshRuns.find(r => r.id === sel.id) ?? null);
         setLoading(false);
-    }, [orgSlug, sel]);
+    }, [apiBase, sel]);
 
     useEffect(() => { loadRuns(); }, []);
 
@@ -940,7 +954,10 @@ export function BuilderClient({ orgSlug }: Props) {
                         <AnimatePresence>
                             {showCreate && !sel && (
                                 <motion.div initial={{ opacity: 0, y: -8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -8 }} transition={{ duration: 0.2 }}>
-                                    <CreateRunForm orgSlug={orgSlug} onCreated={() => { loadRuns(); setShowCreate(false); }} />
+                                    <CreateRunForm
+                                        apiBasePath={apiBase}
+                                        onCreated={() => { loadRuns(); setShowCreate(false); }}
+                                    />
                                 </motion.div>
                             )}
                         </AnimatePresence>
@@ -948,7 +965,7 @@ export function BuilderClient({ orgSlug }: Props) {
                         {/* Detail or list */}
                         <AnimatePresence mode="wait">
                             {sel ? (
-                                <RunDetail key={sel.id} run={sel} orgSlug={orgSlug}
+                                <RunDetail key={sel.id} run={sel} apiBasePath={apiBase}
                                     onRefresh={loadRuns}
                                     onClose={() => setSel(null)} />
                             ) : (
@@ -960,7 +977,7 @@ export function BuilderClient({ orgSlug }: Props) {
                     </>
                 )}
 
-                {tab === "templates" && <TemplateLibrary orgSlug={orgSlug} />}
+                {tab === "templates" && <TemplateLibrary apiBasePath={apiBase} />}
             </div>
         </div>
     );

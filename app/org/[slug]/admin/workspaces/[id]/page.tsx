@@ -1,11 +1,13 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 import { redirect, notFound } from "next/navigation";
 import { requireOrgContext } from "@/lib/auth/org-context";
 import { assertRole } from "@/lib/auth/rbac";
 import { prisma } from "@/lib/prisma";
+import { getAuthContext } from "@/lib/auth/session";
 import Link from "next/link";
 import { WorkspaceTaskBoard } from "./task-board";
 import { WorkspaceChecklist } from "./checklist";
-import { ChevronLeft, Briefcase, Zap, CheckCircle2, AlertTriangle, Clock } from "lucide-react";
+import { ChevronLeft, Briefcase, Zap, CheckCircle2, AlertTriangle } from "lucide-react";
 
 export const runtime = "nodejs";
 
@@ -17,10 +19,22 @@ const PHASE_LABELS: Record<string, string> = {
     handoff: "Handoff",
 };
 
+function isAgencyCommercialUiEnabled(): boolean {
+    const raw = process.env.FF_AGENCY_COMMERCIAL_UI;
+    if (typeof raw === "undefined") return true;
+    const normalized = raw.trim().toLowerCase();
+    return normalized === "1" || normalized === "true" || normalized === "yes" || normalized === "on";
+}
+
 export default async function WorkspaceDetailPage({
     params
 }: { params: Promise<{ slug: string; id: string }> }) {
     const { slug, id } = await params;
+
+    const auth = await getAuthContext();
+    if (isAgencyCommercialUiEnabled() && auth.isAuthenticated && auth.authScope === "agency") {
+        redirect(`/agency/commercial/workspaces/${id}`);
+    }
 
     let ctx: Awaited<ReturnType<typeof requireOrgContext>>;
     try {

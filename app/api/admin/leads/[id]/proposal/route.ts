@@ -1,9 +1,15 @@
 import { NextRequest, NextResponse } from "next/server";
-import { prisma } from "@/lib/prisma";
-import { cookies } from "next/headers";
-import { generateProposal } from "@/lib/proposal-engine";
-import { logAudit } from "@/lib/audit";
-import { logger } from "@/lib/logger";
+import {
+    applyLegacyAdminApiDeprecationHeaders,
+    createLegacyAdminFinalRedirectResponse,
+    createLegacyAdminWriteFrozenResponse,
+    requireAdminApiAccess,
+} from "@/lib/auth/admin-api-guard";
+import {
+    generateProposalHandler,
+    listProposalsHandler,
+    updateProposalHandler,
+} from "@/lib/agency/commercial/leads";
 
 export const runtime = "nodejs";
 
@@ -12,72 +18,32 @@ export const runtime = "nodejs";
  * Generate (or regenerate) a proposal for a lead.
  */
 export async function POST(
-    _req: NextRequest,
-    { params }: { params: Promise<{ id: string }> }
+    req: NextRequest,
+    { params }: { params: Promise<{ id: string }> },
 ) {
-    const cookieStore = await cookies();
-    const token = cookieStore.get("admin_token");
-    if (!token || token.value !== "authenticated_true") {
-        return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
-
     const { id: assessmentId } = await params;
+    const redirectResponse = createLegacyAdminFinalRedirectResponse(req, {
+        successorPath: `/api/agency/commercial/leads/${assessmentId}/proposal`,
+    });
+    if (redirectResponse) return redirectResponse;
 
-    const [assessment, roiProjection, lastPreSales, existingProposals] = await Promise.all([
-        (prisma as any).assessment.findUnique({ where: { id: assessmentId } }),
-        (prisma as any).roiProjection.findUnique({ where: { assessmentId } }),
-        (prisma as any).preSalesArtifact.findFirst({
-            where: { assessmentId },
-            orderBy: { version: "desc" },
-        }),
-        (prisma as any).proposal.findMany({
-            where: { assessmentId },
-            orderBy: { version: "desc" },
-            take: 1,
-        }),
-    ]);
-
-    if (!assessment) {
-        return NextResponse.json({ error: "Lead não encontrado" }, { status: 404 });
+    const access = await requireAdminApiAccess(req, {
+        requiredRole: "admin",
+        allowLegacyTokenFallback: true,
+    });
+    if (!access.ok) {
+        return NextResponse.json({ error: access.error }, { status: access.status });
     }
-
-    const existingVersion = existingProposals[0]?.version ?? 0;
-
-    const proposal = generateProposal({
-        assessment,
-        roiProjection,
-        lastPreSales,
-        existingVersion,
+    const frozen = createLegacyAdminWriteFrozenResponse({
+        successorPath: `/api/agency/commercial/leads/${assessmentId}/proposal`,
+        mode: access.mode,
     });
+    if (frozen) return frozen;
 
-    const saved = await (prisma as any).proposal.create({
-        data: {
-            assessmentId,
-            version: proposal.version,
-            publicSlug: proposal.publicSlug,
-            modules: JSON.stringify(proposal.modules),
-            pricingEstimate: JSON.stringify(proposal.pricingEstimate),
-            roiSnapshot: JSON.stringify(proposal.roiSnapshot),
-            presalesSnapshot: JSON.stringify(proposal.presalesSnapshot),
-            status: "draft",
-        }
-    });
-
-    await logAudit("presales", assessmentId, "proposalGenerated", {
-        version: proposal.version,
-        modules: proposal.modules.length,
-        minBRL: proposal.pricingEstimate.minBRL,
-        maxBRL: proposal.pricingEstimate.maxBRL,
-    });
-
-    logger.info("Proposal generated", { assessmentId, version: proposal.version });
-
-    return NextResponse.json({
-        success: true,
-        proposal: {
-            ...saved,
-            ...proposal,
-        }
+    const response = await generateProposalHandler(assessmentId);
+    return applyLegacyAdminApiDeprecationHeaders(response, {
+        successorPath: `/api/agency/commercial/leads/${assessmentId}/proposal`,
+        mode: access.mode,
     });
 }
 
@@ -86,30 +52,26 @@ export async function POST(
  * Get all proposal versions for a lead.
  */
 export async function GET(
-    _req: NextRequest,
-    { params }: { params: Promise<{ id: string }> }
+    req: NextRequest,
+    { params }: { params: Promise<{ id: string }> },
 ) {
-    const cookieStore = await cookies();
-    const token = cookieStore.get("admin_token");
-    if (!token || token.value !== "authenticated_true") {
-        return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
-
     const { id: assessmentId } = await params;
-
-    const proposals = await (prisma as any).proposal.findMany({
-        where: { assessmentId },
-        orderBy: { version: "desc" },
+    const redirectResponse = createLegacyAdminFinalRedirectResponse(req, {
+        successorPath: `/api/agency/commercial/leads/${assessmentId}/proposal`,
     });
+    if (redirectResponse) return redirectResponse;
 
-    return NextResponse.json({
-        proposals: proposals.map((p: any) => ({
-            ...p,
-            modules: JSON.parse(p.modules),
-            pricingEstimate: JSON.parse(p.pricingEstimate),
-            roiSnapshot: JSON.parse(p.roiSnapshot),
-            presalesSnapshot: JSON.parse(p.presalesSnapshot),
-        }))
+    const access = await requireAdminApiAccess(req, {
+        requiredRole: "admin",
+        allowLegacyTokenFallback: true,
+    });
+    if (!access.ok) {
+        return NextResponse.json({ error: access.error }, { status: access.status });
+    }
+    const response = await listProposalsHandler(assessmentId);
+    return applyLegacyAdminApiDeprecationHeaders(response, {
+        successorPath: `/api/agency/commercial/leads/${assessmentId}/proposal`,
+        mode: access.mode,
     });
 }
 
@@ -119,33 +81,30 @@ export async function GET(
  */
 export async function PATCH(
     request: NextRequest,
-    { params }: { params: Promise<{ id: string }> }
+    { params }: { params: Promise<{ id: string }> },
 ) {
-    const cookieStore = await cookies();
-    const token = cookieStore.get("admin_token");
-    if (!token || token.value !== "authenticated_true") {
-        return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
-
     const { id: assessmentId } = await params;
-    const { proposalId, status, customNotes, modules } = await request.json();
-
-    if (!proposalId) {
-        return NextResponse.json({ error: "proposalId required" }, { status: 400 });
-    }
-
-    const updateData: any = { updatedAt: new Date() };
-    if (status) updateData.status = status;
-    if (customNotes !== undefined) updateData.customNotes = customNotes;
-    if (modules) updateData.modules = JSON.stringify(modules);
-
-    const updated = await (prisma as any).proposal.update({
-        where: { id: proposalId },
-        data: updateData,
+    const redirectResponse = createLegacyAdminFinalRedirectResponse(request, {
+        successorPath: `/api/agency/commercial/leads/${assessmentId}/proposal`,
     });
+    if (redirectResponse) return redirectResponse;
 
-    const action = status ? "proposalStatusChanged" : "proposalUpdated";
-    await logAudit("presales", assessmentId, action, { proposalId, status, customNotes: !!customNotes });
+    const access = await requireAdminApiAccess(request, {
+        requiredRole: "admin",
+        allowLegacyTokenFallback: true,
+    });
+    if (!access.ok) {
+        return NextResponse.json({ error: access.error }, { status: access.status });
+    }
+    const frozen = createLegacyAdminWriteFrozenResponse({
+        successorPath: `/api/agency/commercial/leads/${assessmentId}/proposal`,
+        mode: access.mode,
+    });
+    if (frozen) return frozen;
 
-    return NextResponse.json({ success: true, proposal: updated });
+    const response = await updateProposalHandler(request, assessmentId);
+    return applyLegacyAdminApiDeprecationHeaders(response, {
+        successorPath: `/api/agency/commercial/leads/${assessmentId}/proposal`,
+        mode: access.mode,
+    });
 }

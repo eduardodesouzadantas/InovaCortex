@@ -44,22 +44,47 @@ export async function scanRevenueLeaks(orgId: string): Promise<LeakResult> {
                 description: "Propostas enviadas/visualizadas sem interação há mais de 3 dias."
             });
         }
-
-        // 2. Leads quentes sem reunião (Leads com LeadSequence 'hot' e sem Meeting)
+        // 2. Leads quentes sem reunião
         const hotSequences = await (prisma as any).leadSequence.findMany({
             where: {
                 organizationId: orgId,
                 scoreTier: "hot",
-                assessment: { meetings: { none: {} } }
             },
-            include: { assessment: { select: { email: true } } },
+            select: { assessmentId: true },
             take: 10
         });
 
+        let hotWithoutMeetingCount = 0;
         if (hotSequences.length > 0) {
-            const loss = hotSequences.length * avgTicketCents * 0.4;
+            const hotAssessmentIds = hotSequences
+                .map((sequence: { assessmentId?: string | null }) => sequence.assessmentId)
+                .filter((assessmentId: string | null | undefined): assessmentId is string => Boolean(assessmentId));
+
+            if (hotAssessmentIds.length > 0) {
+                const meetingRows = await (prisma as any).meetingSession.findMany({
+                    where: {
+                        organizationId: orgId,
+                        assessmentId: { in: hotAssessmentIds },
+                    },
+                    select: { assessmentId: true },
+                });
+
+                const assessmentIdsWithMeeting = new Set(
+                    meetingRows
+                        .map((meeting: { assessmentId?: string | null }) => meeting.assessmentId)
+                        .filter((assessmentId: string | null | undefined): assessmentId is string => Boolean(assessmentId)),
+                );
+
+                hotWithoutMeetingCount = hotAssessmentIds.filter(
+                    (assessmentId: string) => !assessmentIdsWithMeeting.has(assessmentId),
+                ).length;
+            }
+        }
+
+        if (hotWithoutMeetingCount > 0) {
+            const loss = hotWithoutMeetingCount * avgTicketCents * 0.4;
             leakItems.push({
-                label: `${hotSequences.length} leads quentes sem reunião`,
+                label: `${hotWithoutMeetingCount} leads quentes sem reunião`,
                 value: `R$ ${(loss / 100).toLocaleString('pt-BR')}`,
                 potentialLoss: loss,
                 description: "Oportunidades quentes em sequências de outbound que ainda não agendaram diagnóstico."
