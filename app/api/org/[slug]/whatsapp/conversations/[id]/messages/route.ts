@@ -19,7 +19,7 @@ export async function GET(
             return NextResponse.json({ error: "Not Found" }, { status: 404 });
         }
 
-        if (role === "sales" && convo.assignedUserId !== userId) {
+        if (role === "closer" && convo.assignedUserId !== userId) {
             return NextResponse.json({ error: "Access Denied" }, { status: 403 });
         }
 
@@ -41,7 +41,11 @@ export async function GET(
         return NextResponse.json({ messages }, { status: 200 });
 
     } catch (e: any) {
-        if (e.message === "Unauthorized") return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+        if (e?.message === "UNAUTHENTICATED") return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+        if (e?.message === "ORG_NOT_FOUND") return NextResponse.json({ error: "Organization not found" }, { status: 404 });
+        if (typeof e?.message === "string" && e.message.startsWith("FORBIDDEN")) {
+            return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+        }
         console.error("GET /messages Error:", e);
         return NextResponse.json({ error: "Internal Error" }, { status: 500 });
     }

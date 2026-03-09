@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
+import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { requireOrgContext } from "@/lib/auth/org-context";
-import { can } from "@/lib/auth/rbac";
 
 export async function GET(
     request: Request,
@@ -12,26 +12,25 @@ export async function GET(
 
         const { searchParams } = new URL(request.url);
         const unreadOnly = searchParams.get("unread") === "true";
-        const status = searchParams.get("status") || "open";
+        const requestedStatus = searchParams.get("status");
+        const status = requestedStatus === "closed" || requestedStatus === "snoozed" ? requestedStatus : "open";
 
-        // Security: If user is "sales", restrict them to their assigned conversations
-        // Wait, WhatsAppConversation holds `assignedUserId`, so we filter by it.
-        const isSales = role === "sales";
+        const isCloser = role === "closer";
 
-        const whereClause: any = {
+        const whereClause: Prisma.WhatsAppConversationWhereInput = {
             organizationId: orgId,
-            status: status
+            status,
         };
 
         if (unreadOnly) {
             whereClause.unreadCount = { gt: 0 };
         }
 
-        if (isSales) {
+        if (isCloser) {
             whereClause.assignedUserId = userId;
         }
 
-        const conversations: any = await prisma.whatsAppConversation.findMany({
+        const conversations = await prisma.whatsAppConversation.findMany({
             where: whereClause,
             include: {
                 contact: {
@@ -40,6 +39,7 @@ export async function GET(
                         phoneNumberE164: true,
                         tags: true,
                         lifecycle: true,
+                        optedOutAt: true,
                         lastOutboundAt: true,
                         sessionWindowUntil: true
                     }
@@ -58,17 +58,23 @@ export async function GET(
             take: 50
         });
 
-        // Add dynamically calculated 24h compliance flag for the client
         const now = new Date();
-        const payload = conversations.map((c: any) => {
-            const isOutside24h = c.contact?.sessionWindowUntil ? (new Date(c.contact.sessionWindowUntil) < now) : true;
-            return { ...c, isOutside24h };
+        const payload = conversations.map((conversation) => {
+            const isOutside24h = conversation.contact?.sessionWindowUntil
+                ? new Date(conversation.contact.sessionWindowUntil) < now
+                : true;
+            return { ...conversation, isOutside24h };
         });
 
         return NextResponse.json({ conversations: payload }, { status: 200 });
-    } catch (e: any) {
-        if (e.message === "Unauthorized") return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-        console.error("GET /conversations Error:", e);
+    } catch (error: unknown) {
+        const message = error instanceof Error ? error.message : "";
+        if (message === "UNAUTHENTICATED") return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+        if (message === "ORG_NOT_FOUND") return NextResponse.json({ error: "Organization not found" }, { status: 404 });
+        if (message.startsWith("FORBIDDEN")) {
+            return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+        }
+        console.error("GET /conversations Error:", error);
         return NextResponse.json({ error: "Internal Error" }, { status: 500 });
     }
 }
