@@ -17,7 +17,7 @@ interface PageProps {
 export default async function SalesPage({ params }: PageProps) {
     const session = await getSession();
     if (!session || session.orgSlug !== params.slug) {
-        redirect("/login");
+        redirect(`/org/${params.slug}/admin/login`);
     }
 
     const org = await prisma.organization.findUnique({
