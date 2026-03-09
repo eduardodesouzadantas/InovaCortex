@@ -1,14 +1,62 @@
-import { NextResponse } from 'next/server';
-import { prisma } from '@/lib/prisma';
-import { cookies } from 'next/headers';
-import * as jose from 'jose';
+import { NextResponse } from "next/server";
+import { prisma } from "@/lib/prisma";
+import { requireOrgContext } from "@/lib/auth/org-context";
+import { writeAuditEvent } from "@/lib/audit";
+import {
+    deriveSizeBand,
+    isValidMarketWindow,
+    normalizeIndustry,
+    normalizePlan,
+    type MarketWindow,
+} from "@/lib/market-intel/segment-utils";
+
+type SegmentQuery = {
+    industry: string;
+    sizeBand: string;
+    plan: string;
+    timeWindow: MarketWindow;
+};
+
+function authErrorResponse(e: unknown) {
+    const message = e instanceof Error ? e.message : "";
+    if (message === "UNAUTHENTICATED") return NextResponse.json({ ok: false, error: "Unauthorized" }, { status: 401 });
+    if (message === "ORG_NOT_FOUND") return NextResponse.json({ ok: false, error: "Organization not found" }, { status: 404 });
+    if (typeof message === "string" && message.startsWith("FORBIDDEN")) {
+        return NextResponse.json({ ok: false, error: "Forbidden" }, { status: 403 });
+    }
+    return null;
+}
+
+async function findBestSegment(query: SegmentQuery) {
+    const attempts = [
+        { industry: query.industry, sizeBand: query.sizeBand, plan: query.plan, timeWindow: query.timeWindow },
+        { industry: query.industry, sizeBand: query.sizeBand, plan: "all", timeWindow: query.timeWindow },
+        { industry: query.industry, sizeBand: "all", plan: "all", timeWindow: query.timeWindow },
+        { industry: "all", sizeBand: "all", plan: "all", timeWindow: query.timeWindow },
+    ] as const;
+
+    for (const attempt of attempts) {
+        const segment = await prisma.benchmarkSegment.findFirst({
+            where: {
+                industry: { equals: attempt.industry, mode: "insensitive" },
+                sizeBand: { equals: attempt.sizeBand, mode: "insensitive" },
+                plan: { equals: attempt.plan, mode: "insensitive" },
+                timeWindow: attempt.timeWindow,
+            },
+            include: { snapshots: true },
+            orderBy: { periodEnd: "desc" }
+        });
+        if (segment) return segment;
+    }
+
+    return null;
+}
 
 /**
  * GET /api/org/[slug]/market-intel/snapshots?window=30d
- * Returns aggregated benchmark metrics for an organization's segment,
- * providing the orgCount to prove K-Anonymity without leaking orgIds.
- * 
- * Includes an AuditEvent.
+ * Contract:
+ * - 200 { ok: true, insufficientData: false, segment, snapshot }
+ * - 200 { ok: true, insufficientData: true, segment: null, snapshot: null, message }
  */
 export async function GET(
     request: Request,
@@ -16,69 +64,61 @@ export async function GET(
 ) {
     try {
         const { slug } = await params;
+        const { orgId } = await requireOrgContext(slug);
         const url = new URL(request.url);
-        const window = url.searchParams.get('window') || '30d';
+        const windowRaw = (url.searchParams.get("window") || "30d").toLowerCase();
 
-        // 1. RBAC Auth Check (Simplified logic for POC)
-        const token = (await cookies()).get('admin_token')?.value;
-        if (!token) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+        if (!isValidMarketWindow(windowRaw)) {
+            return NextResponse.json(
+                { ok: false, error: "Invalid window. Allowed values: 7d, 30d, 90d" },
+                { status: 400 }
+            );
+        }
 
-        // Retrieve ORG to figure out its dimensions
         const org = await prisma.organization.findUnique({
-            where: { slug },
-            select: { id: true, plan: true }
+            where: { id: orgId },
+            select: { id: true, industry: true, maxUsers: true, plan: true }
         });
+        if (!org) return NextResponse.json({ ok: false, error: "Organization not found" }, { status: 404 });
 
-        if (!org) return NextResponse.json({ error: 'Org not found' }, { status: 404 });
+        const segmentQuery: SegmentQuery = {
+            industry: normalizeIndustry(org.industry),
+            sizeBand: deriveSizeBand(org.maxUsers),
+            plan: normalizePlan(org.plan),
+            timeWindow: windowRaw,
+        };
 
-        const industry = (org as any).industry || "general";
-        const sizeBand = (org as any).sizeBand || "small";
-        const plan = org.plan || "free";
+        const targetSegment = await findBestSegment(segmentQuery);
+        if (!targetSegment || !targetSegment.snapshots) {
+            return NextResponse.json({
+                ok: true,
+                insufficientData: true,
+                insufficient_data: true,
+                message: "No K-anonymity benchmark bucket available for this segment yet.",
+                segment: null,
+                snapshot: null,
+            });
+        }
 
-        // 2. Fetch Snapshots that loosely match the org's dimensions (fallback to generic buckets)
-        // If a segment collapsed (e.g. sizeBand fell back to "all"), we want to match it.
-        // We'll query backwards from most specific to least specific.
+        let snapshot: Record<string, number> | null = null;
+        try {
+            snapshot = JSON.parse(targetSegment.snapshots.metrics);
+        } catch {
+            return NextResponse.json({ ok: false, error: "Benchmark snapshot is invalid" }, { status: 500 });
+        }
 
-        let targetSegment = await prisma.benchmarkSegment.findFirst({
-            where: { industry, sizeBand, plan, timeWindow: window },
-            include: { snapshots: true },
-            orderBy: { periodEnd: 'desc' }
+        await writeAuditEvent({
+            organizationId: org.id,
+            action: "benchmarkViewed",
+            details: { segmentId: targetSegment.id, window: windowRaw },
+            strict: true,
+            context: { segmentId: targetSegment.id, window: windowRaw },
         });
-
-        if (!targetSegment) {
-            targetSegment = await prisma.benchmarkSegment.findFirst({
-                where: { industry, sizeBand, plan: 'all', timeWindow: window },
-                include: { snapshots: true },
-                orderBy: { periodEnd: 'desc' }
-            });
-        }
-
-        if (!targetSegment) {
-            targetSegment = await prisma.benchmarkSegment.findFirst({
-                where: { industry, sizeBand: 'all', plan: 'all', timeWindow: window },
-                include: { snapshots: true },
-                orderBy: { periodEnd: 'desc' }
-            });
-        }
-
-        if (!targetSegment) {
-            return NextResponse.json({ insufficient_data: true, message: 'No K-Anonymity benchmark bucket available for this segment yet.' }, { status: 204 });
-        }
-
-        // 3. Log Audit Event
-        const dummyAssessment = await prisma.assessment.findFirst({ where: { organizationId: org.id } });
-        if (dummyAssessment) {
-            await prisma.auditEvent.create({
-                data: {
-                    assessmentId: dummyAssessment.id,
-                    organizationId: org.id,
-                    action: 'benchmarkViewed',
-                    details: `Viewed benchmark for segment ${targetSegment.id}`
-                }
-            });
-        }
 
         return NextResponse.json({
+            ok: true,
+            insufficientData: false,
+            insufficient_data: false,
             segment: {
                 orgCount: targetSegment.orgCount,
                 industry: targetSegment.industry,
@@ -86,11 +126,13 @@ export async function GET(
                 plan: targetSegment.plan,
                 periodEnd: targetSegment.periodEnd
             },
-            snapshot: (targetSegment as any).snapshots ? JSON.parse((targetSegment as any).snapshots.metrics) : null
+            snapshot,
         });
+    } catch (e: unknown) {
+        const authResponse = authErrorResponse(e);
+        if (authResponse) return authResponse;
 
-    } catch (error) {
-        console.error("Market Intel GET Error:", error);
-        return NextResponse.json({ error: "Failed to fetch benchmarks" }, { status: 500 });
+        console.error("Market Intel GET Error:", e);
+        return NextResponse.json({ ok: false, error: "Failed to fetch benchmarks" }, { status: 500 });
     }
 }
