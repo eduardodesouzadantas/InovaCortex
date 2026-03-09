@@ -1,26 +1,124 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { useParams } from "next/navigation";
 import {
-    Settings,
-    ShieldCheck,
-    Key,
-    Webhook,
     Bell,
-    Save,
-    Copy,
     CheckCircle2,
     ExternalLink,
-    Smartphone
+    Key,
+    Loader2,
+    Save,
+    ShieldCheck,
+    Smartphone,
 } from "lucide-react";
 
-export function SettingsTab() {
-    const [activeSubtab, setActiveSubtab] = useState("api");
-    const [saved, setSaved] = useState(false);
+type SettingItem = {
+    key: string;
+    masked?: string;
+    configured?: boolean;
+};
 
-    const handleSave = () => {
-        setSaved(true);
-        setTimeout(() => setSaved(false), 3000);
+const META_FIELDS = [
+    { key: "META_WABA_ID", label: "ID da Conta do WhatsApp Business (WABA_ID)", type: "text" },
+    { key: "META_PHONE_NUMBER_ID", label: "ID do Telefone (Phone Number ID)", type: "text" },
+    { key: "META_ACCESS_TOKEN", label: "Token de Acesso (Access Token Permanente)", type: "password" },
+    { key: "META_VERIFY_TOKEN", label: "Token de Verificação do Webhook", type: "text" },
+] as const;
+
+type FieldKey = typeof META_FIELDS[number]["key"];
+
+function getErrorMessage(err: unknown, fallback: string): string {
+    if (err instanceof Error && err.message) return err.message;
+    return fallback;
+}
+
+export function SettingsTab() {
+    const params = useParams();
+    const slug = params.slug as string;
+
+    const [activeSubtab, setActiveSubtab] = useState("api");
+    const [loading, setLoading] = useState(true);
+    const [saving, setSaving] = useState(false);
+    const [status, setStatus] = useState<"idle" | "success" | "error">("idle");
+    const [feedback, setFeedback] = useState<string | null>(null);
+    const [configuredMap, setConfiguredMap] = useState<Record<string, SettingItem>>({});
+    const [values, setValues] = useState<Record<FieldKey, string>>({
+        META_WABA_ID: "",
+        META_PHONE_NUMBER_ID: "",
+        META_ACCESS_TOKEN: "",
+        META_VERIFY_TOKEN: "",
+    });
+
+    async function fetchConfig() {
+        setLoading(true);
+        setFeedback(null);
+        try {
+            const res = await fetch(`/api/org/${encodeURIComponent(slug)}/whatsapp/config/meta`);
+            const data = await res.json().catch(() => ({}));
+            if (!res.ok) throw new Error(data?.error || "Falha ao carregar configurações");
+
+            const map: Record<string, SettingItem> = {};
+            for (const item of (data.settings || []) as SettingItem[]) {
+                map[item.key] = item;
+            }
+            setConfiguredMap(map);
+        } catch (err: unknown) {
+            setFeedback(getErrorMessage(err, "Erro ao carregar configurações"));
+            setStatus("error");
+        } finally {
+            setLoading(false);
+        }
+    }
+
+    useEffect(() => {
+        fetchConfig();
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [slug]);
+
+    const webhookUrl = useMemo(() => {
+        if (typeof window === "undefined") return `/api/webhooks/meta`;
+        return `${window.location.origin}/api/webhooks/meta`;
+    }, []);
+
+    const handleSave = async () => {
+        setSaving(true);
+        setStatus("idle");
+        setFeedback(null);
+        try {
+            const changedEntries = META_FIELDS
+                .map((field) => ({ key: field.key, value: values[field.key].trim() }))
+                .filter((item) => item.value.length > 0);
+
+            if (changedEntries.length === 0) {
+                setFeedback("Nenhuma alteração informada. Preencha os campos que deseja atualizar.");
+                setStatus("error");
+                return;
+            }
+
+            const res = await fetch(`/api/org/${encodeURIComponent(slug)}/whatsapp/config/meta`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify(changedEntries),
+            });
+            const data = await res.json().catch(() => ({}));
+            if (!res.ok) throw new Error(data?.error || "Falha ao salvar configurações");
+
+            setValues({
+                META_WABA_ID: "",
+                META_PHONE_NUMBER_ID: "",
+                META_ACCESS_TOKEN: "",
+                META_VERIFY_TOKEN: "",
+            });
+            await fetchConfig();
+            setStatus("success");
+            setFeedback("Configurações salvas com sucesso.");
+        } catch (err: unknown) {
+            setStatus("error");
+            setFeedback(getErrorMessage(err, "Falha ao salvar configurações"));
+        } finally {
+            setSaving(false);
+        }
     };
 
     const sections = [
@@ -31,7 +129,6 @@ export function SettingsTab() {
 
     return (
         <div className="flex h-full overflow-hidden">
-            {/* Settings Sub-nav */}
             <aside className="w-64 border-r border-white/5 bg-black/10 p-6 flex flex-col gap-2">
                 <h3 className="text-[10px] font-black uppercase tracking-widest text-white/30 mb-4 px-2">Configurações</h3>
                 {sections.map((s) => (
@@ -49,112 +146,110 @@ export function SettingsTab() {
                 ))}
             </aside>
 
-            {/* Settings Form Content */}
             <main className="flex-1 p-10 overflow-y-auto custom-scrollbar">
-                {activeSubtab === "api" && (
-                    <div className="max-w-2xl flex flex-col gap-10 animate-in fade-in slide-in-from-right-4">
-                        <section>
-                            <div className="flex items-center gap-3 mb-6">
-                                <div className="w-10 h-10 rounded-2xl bg-gold/10 flex items-center justify-center text-gold">
-                                    <Smartphone className="w-5 h-5" />
-                                </div>
-                                <div>
-                                    <h2 className="text-xl font-bold text-white/90">WhatsApp Cloud API</h2>
-                                    <p className="text-sm text-white/40">Configure suas credenciais do Meta Business Manager.</p>
-                                </div>
-                            </div>
-
-                            <div className="space-y-6">
-                                <div className="flex flex-col gap-2">
-                                    <label className="text-[10px] font-black uppercase tracking-widest text-white/30 ml-1">Phone Number ID</label>
-                                    <div className="flex gap-2">
-                                        <input
-                                            type="text"
-                                            defaultValue="102938475610293"
-                                            className="flex-1 bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-sm text-white/80 focus:outline-none focus:border-gold/40 transition-all font-mono"
-                                        />
-                                        <button className="p-3 bg-white/5 border border-white/10 rounded-xl hover:text-gold transition-colors"><Copy className="w-4 h-4" /></button>
-                                    </div>
-                                </div>
-
-                                <div className="flex flex-col gap-2">
-                                    <label className="text-[10px] font-black uppercase tracking-widest text-white/30 ml-1">Access Token (Permanent)</label>
-                                    <input
-                                        type="password"
-                                        defaultValue="EAAZA1234567890abcdefghijklmno"
-                                        className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-sm text-white/80 focus:outline-none focus:border-gold/40 transition-all font-mono"
-                                    />
-                                </div>
-
-                                <div className="p-4 rounded-2xl bg-blue-500/5 border border-blue-500/20 flex items-start gap-4">
-                                    <Webhook className="w-6 h-6 text-blue-500 shrink-0 mt-1" />
-                                    <div className="flex-1">
-                                        <h4 className="text-sm font-bold text-blue-500">Webhook Endpoint</h4>
-                                        <p className="text-xs text-white/40 mt-1 leading-relaxed">
-                                            Utilize esta URL no painel do Meta para receber eventos em tempo real.
-                                        </p>
-                                        <div className="mt-3 p-2 bg-black/40 rounded-lg border border-white/5 flex items-center justify-between">
-                                            <code className="text-[10px] text-blue-400">https://inovacortex.com/api/webhooks/meta</code>
-                                            <button className="text-[10px] text-white/30 hover:text-white/60">Copiar</button>
+                {loading ? (
+                    <div className="h-full flex items-center justify-center">
+                        <Loader2 className="w-8 h-8 animate-spin text-gold/50" />
+                    </div>
+                ) : (
+                    <>
+                        {activeSubtab === "api" && (
+                            <div className="max-w-3xl flex flex-col gap-8 animate-in fade-in slide-in-from-right-4">
+                                <section>
+                                    <div className="flex items-center gap-3 mb-6">
+                                        <div className="w-10 h-10 rounded-2xl bg-gold/10 flex items-center justify-center text-gold">
+                                            <Smartphone className="w-5 h-5" />
+                                        </div>
+                                        <div>
+                                            <h2 className="text-xl font-bold text-white/90">WhatsApp Cloud API</h2>
+                                            <p className="text-sm text-white/40">Atualize credenciais do Meta para esta organização.</p>
                                         </div>
                                     </div>
+
+                                    <div className="space-y-5">
+                                        {META_FIELDS.map((field) => {
+                                            const current = configuredMap[field.key];
+                                            return (
+                                                <div key={field.key} className="flex flex-col gap-2">
+                                                    <label className="text-[10px] font-black uppercase tracking-widest text-white/30 ml-1">
+                                                        {field.label}
+                                                    </label>
+                                                    <input
+                                                        type={field.type}
+                                                        value={values[field.key]}
+                                                        onChange={(e) => setValues((prev) => ({ ...prev, [field.key]: e.target.value }))}
+                                                        placeholder={current?.masked || `Informe ${field.key}`}
+                                                        className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-sm text-white/80 focus:outline-none focus:border-gold/40 transition-all font-mono"
+                                                    />
+                                                    <div className="text-[10px] text-white/40 uppercase tracking-widest">
+                                                        {current?.configured ? "Configurado" : "Não configurado"}
+                                                    </div>
+                                                </div>
+                                            );
+                                        })}
+                                    </div>
+
+                                    <div className="mt-6 p-4 rounded-2xl bg-blue-500/5 border border-blue-500/20">
+                                        <h4 className="text-sm font-bold text-blue-400">Webhook Endpoint</h4>
+                                        <p className="text-xs text-white/40 mt-1 leading-relaxed">
+                                            Configure esta URL no painel Meta para recebimento de eventos.
+                                        </p>
+                                        <code className="block mt-3 text-[11px] text-blue-300 break-all">{webhookUrl}</code>
+                                    </div>
+                                </section>
+                            </div>
+                        )}
+
+                        {activeSubtab === "compliance" && (
+                            <div className="max-w-2xl flex flex-col gap-6 animate-in fade-in slide-in-from-right-4">
+                                <h2 className="text-xl font-bold text-white/90">Regras de Compliance</h2>
+                                <div className="p-5 rounded-2xl bg-white/[0.02] border border-white/10 text-sm text-white/60">
+                                    Janela de 24h e bloqueio de envio livre fora de sessão já são aplicados no backend de envio.
+                                </div>
+                                <div className="p-5 rounded-2xl bg-white/[0.02] border border-white/10 text-sm text-white/60">
+                                    Mensagens fora da janela exigem template aprovado, conforme política do Meta.
                                 </div>
                             </div>
-                        </section>
-                    </div>
+                        )}
+
+                        {activeSubtab === "notifications" && (
+                            <div className="max-w-2xl flex flex-col gap-6 animate-in fade-in slide-in-from-right-4">
+                                <h2 className="text-xl font-bold text-white/90">Notificações Operacionais</h2>
+                                <div className="p-5 rounded-2xl bg-white/[0.02] border border-white/10 text-sm text-white/60">
+                                    Alertas de erros de envio e eventos de conversa seguem o pipeline de logs/monitoramento do backend.
+                                </div>
+                            </div>
+                        )}
+
+                        <div className="mt-12 flex items-center justify-between pt-10 border-t border-white/5">
+                            <a
+                                href="https://developers.facebook.com/docs/whatsapp"
+                                target="_blank"
+                                rel="noreferrer"
+                                className="flex items-center gap-2 text-[10px] font-black uppercase tracking-widest text-white/30 hover:text-white/60"
+                            >
+                                <ExternalLink className="w-4 h-4" />
+                                Documentação Meta
+                            </a>
+                            {activeSubtab === "api" && (
+                                <button
+                                    onClick={handleSave}
+                                    disabled={saving}
+                                    className="flex items-center gap-2 px-8 py-3 bg-gold text-black rounded-xl font-black text-xs uppercase tracking-widest hover:bg-gold/90 transition-all shadow-lg shadow-gold/20 disabled:opacity-50"
+                                >
+                                    {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : status === "success" ? <CheckCircle2 className="w-4 h-4" /> : <Save className="w-4 h-4" />}
+                                    {saving ? "Salvando..." : status === "success" ? "Configurações Salvas" : "Salvar Alterações"}
+                                </button>
+                            )}
+                        </div>
+
+                        {feedback && (
+                            <div className={`mt-4 rounded-xl border px-3 py-2 text-xs ${status === "success" ? "border-green-500/30 bg-green-500/10 text-green-300" : "border-red-500/30 bg-red-500/10 text-red-300"}`}>
+                                {feedback}
+                            </div>
+                        )}
+                    </>
                 )}
-
-                {activeSubtab === "compliance" && (
-                    <div className="max-w-2xl flex flex-col gap-10 animate-in fade-in slide-in-from-right-4">
-                        <section>
-                            <div className="flex items-center gap-3 mb-6">
-                                <div className="w-10 h-10 rounded-2xl bg-amber-500/10 flex items-center justify-center text-amber-500">
-                                    <ShieldCheck className="w-5 h-5" />
-                                </div>
-                                <div>
-                                    <h2 className="text-xl font-bold text-white/90">Regras de Compliance</h2>
-                                    <p className="text-sm text-white/40">Gerencie o consentimento e a janela de 24 horas.</p>
-                                </div>
-                            </div>
-
-                            <div className="space-y-8">
-                                <div className="flex items-center justify-between p-6 rounded-3xl bg-white/[0.02] border border-white/5">
-                                    <div>
-                                        <h4 className="text-sm font-bold text-white/80">Janela de 24h Estrita</h4>
-                                        <p className="text-xs text-white/30 mt-1">Bloqueia automaticamente o envio de mensagens livres fora da janela.</p>
-                                    </div>
-                                    <div className="w-12 h-6 rounded-full bg-gold/20 border border-gold/40 relative">
-                                        <div className="absolute right-1 top-1 w-4 h-4 bg-gold rounded-full shadow-lg" />
-                                    </div>
-                                </div>
-
-                                <div className="flex items-center justify-between p-6 rounded-3xl bg-white/[0.02] border border-white/5 opacity-50">
-                                    <div>
-                                        <h4 className="text-sm font-bold text-white/80">Double Opt-in</h4>
-                                        <p className="text-xs text-white/30 mt-1">Envia uma mensagem de confirmação antes de disparar campanhas.</p>
-                                    </div>
-                                    <div className="w-12 h-6 rounded-full bg-white/10 border border-white/10 relative">
-                                        <div className="absolute left-1 top-1 w-4 h-4 bg-white/40 rounded-full" />
-                                    </div>
-                                </div>
-                            </div>
-                        </section>
-                    </div>
-                )}
-
-                <div className="mt-12 flex items-center justify-between pt-10 border-t border-white/5">
-                    <button className="flex items-center gap-2 text-[10px] font-black uppercase tracking-widest text-white/30 hover:text-white/60">
-                        <ExternalLink className="w-4 h-4" />
-                        Documentação Meta
-                    </button>
-                    <button
-                        onClick={handleSave}
-                        className="flex items-center gap-2 px-8 py-3 bg-gold text-black rounded-xl font-black text-xs uppercase tracking-widest hover:bg-gold/90 transition-all shadow-lg shadow-gold/20"
-                    >
-                        {saved ? <CheckCircle2 className="w-4 h-4" /> : <Save className="w-4 h-4" />}
-                        {saved ? "Configurações Salvas" : "Salvar Alterações"}
-                    </button>
-                </div>
             </main>
         </div>
     );

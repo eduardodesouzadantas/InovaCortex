@@ -8,7 +8,23 @@ import { getHelp } from "@/lib/help/use-help";
 import { GUIDE_IDS } from "@/lib/help/guide-ids";
 
 interface ConversationListProps {
-    conversations: any[];
+    conversations: Array<{
+        id: string;
+        createdAt: string;
+        status: string;
+        unreadCount: number;
+        lastMessageAt?: string | null;
+        lastMessagePreview?: string | null;
+        slaDueAt?: string | null;
+        contact: {
+            name?: string | null;
+            phoneNumberE164?: string | null;
+        };
+        user?: {
+            name?: string | null;
+            email?: string | null;
+        } | null;
+    }>;
     selectedId: string | null;
     onSelect: (id: string) => void;
 }
@@ -21,6 +37,13 @@ export function ConversationList({ conversations, selectedId, onSelect }: Conver
                 const lastMsgAt = convo.lastMessageAt ? new Date(convo.lastMessageAt) : new Date(convo.createdAt);
                 const slaBreached = convo.slaDueAt && new Date(convo.slaDueAt) < new Date() && convo.status === 'open';
                 const isUnread = convo.unreadCount > 0;
+                const assigneeLabel = (() => {
+                    const rawName = convo.user?.name;
+                    if (typeof rawName === "string" && rawName.trim().length > 0) return rawName.split(" ")[0];
+                    const email = convo.user?.email;
+                    if (typeof email === "string" && email.includes("@")) return email.split("@")[0];
+                    return "Agente";
+                })();
 
                 return (
                     <button
@@ -84,7 +107,7 @@ export function ConversationList({ conversations, selectedId, onSelect }: Conver
                                 {convo.user && (
                                     <div className="text-[9px] text-white/20 uppercase font-medium flex items-center gap-1">
                                         <div className="w-1 h-1 rounded-full bg-green-500" />
-                                        {convo.user.name.split(' ')[0]}
+                                        {assigneeLabel}
                                     </div>
                                 )}
                                 {!convo.user && convo.status === 'open' && (

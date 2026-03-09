@@ -1,46 +1,37 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useEffect, useState } from "react";
 import { useParams } from "next/navigation";
 import {
-    MessageSquare,
-    Send,
-    LayoutGrid,
-    Users,
-    Settings,
-    Search,
-    Filter,
-    MoreVertical,
-    Clock,
     AlertCircle,
-    CheckCircle2
+    LayoutGrid,
+    MessageSquare,
+    MoreVertical,
+    Send,
+    Settings,
+    Users,
 } from "lucide-react";
-import { InboxTab } from "./_components/inbox-tab";
 import { ProductWalkthrough } from "@/components/product-guide/walkthrough";
-import { useLearningMode } from "@/lib/help/use-learning-mode";
-import { isLearningModeEnabled } from "@/lib/help/learning-mode";
-import { GUIDE_IDS } from "@/lib/help/guide-ids";
 import { GuideLauncher } from "@/components/product-guide/guide-launcher";
-// Placeholder imports for other tabs - will be implemented next
-const CampaignsTab = () => <div className="p-8 text-white/60">Campanhas em breve...</div>;
-const TemplatesTab = () => <div className="p-8 text-white/60">Templates em breve...</div>;
-const TeamTab = () => <div className="p-8 text-white/60">Equipe em breve...</div>;
-const SettingsTab = () => <div className="p-8 text-white/60">Configurações em breve...</div>;
+import { GUIDE_IDS } from "@/lib/help/guide-ids";
+import { InboxTab } from "./_components/inbox-tab";
+import { CampaignsTab } from "./_components/campaigns-tab";
+import { TemplatesTab } from "./_components/templates-tab";
+import { TeamTab } from "./_components/team-tab";
+import { SettingsTab } from "./_components/settings-tab";
 
 export default function WhatsAppCRMPage() {
     const params = useParams();
     const slug = params.slug as string;
     const [activeTab, setActiveTab] = useState("inbox");
     const [stats, setStats] = useState({ total: 0, unassigned: 0, breached: 0 });
-    const { userSettings } = useLearningMode();
     const [forceStartGuide, setForceStartGuide] = useState(false);
 
     useEffect(() => {
-        // Fetch basic stats for the dashboard header/badges
         fetch(`/api/org/${slug}/whatsapp/stats`)
-            .then(res => res.json())
-            .then(data => setStats(data))
-            .catch(err => console.error("Stats fetch error:", err));
+            .then((res) => res.json())
+            .then((data) => setStats(data))
+            .catch((err) => console.error("Stats fetch error:", err));
     }, [slug]);
 
     const tabs = [
@@ -54,7 +45,6 @@ export default function WhatsAppCRMPage() {
     return (
         <div className="flex flex-col h-screen bg-[#050505] text-white font-sans selection:bg-gold/30">
             <ProductWalkthrough guide="whatsappCrm" forceStart={forceStartGuide} onClose={() => setForceStartGuide(false)} />
-            {/* Header Bar */}
             <header className="h-16 border-b border-white/5 bg-black/40 backdrop-blur-xl flex items-center justify-between px-6 shrink-0">
                 <div className="flex items-center gap-3">
                     <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-gold to-amber-600 flex items-center justify-center shadow-lg shadow-gold/20">
@@ -87,9 +77,7 @@ export default function WhatsAppCRMPage() {
                 </div>
             </header>
 
-            {/* Main Content Area */}
             <div className="flex flex-1 overflow-hidden">
-                {/* Navigation Sidebar */}
                 <nav className="w-20 lg:w-64 border-r border-white/5 bg-black/20 flex flex-col p-4 gap-2 transition-all duration-300">
                     {tabs.map((tab) => {
                         const Icon = tab.icon;
@@ -129,7 +117,6 @@ export default function WhatsAppCRMPage() {
                     })}
                 </nav>
 
-                {/* Tab Viewport */}
                 <main className="flex-1 overflow-hidden relative">
                     <div className="absolute inset-0 bg-gradient-to-br from-transparent via-gold/[0.02] to-transparent pointer-events-none" />
 

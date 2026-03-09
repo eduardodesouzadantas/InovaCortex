@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { useParams } from "next/navigation";
-import { Search, Filter, Loader2, MessageSquare } from "lucide-react";
+import { Search, Loader2, MessageSquare } from "lucide-react";
 import { ConversationList } from "./conversation-list";
 import { ChatPane } from "./chat-pane";
 import { HelpPopover } from "@/components/ui/help-popover";
@@ -12,10 +12,33 @@ export function InboxTab() {
     const params = useParams();
     const slug = params.slug as string;
 
-    const [conversations, setConversations] = useState<any[]>([]);
+    const [conversations, setConversations] = useState<Array<{
+        id: string;
+        createdAt: string;
+        status: string;
+        unreadCount: number;
+        lastMessageAt?: string | null;
+        lastMessagePreview?: string | null;
+        slaDueAt?: string | null;
+        isOutside24h?: boolean;
+        contact: {
+            name?: string | null;
+            phoneNumberE164?: string | null;
+            tags?: string | null;
+            lifecycle?: string | null;
+            wa_id?: string | null;
+            lastMessageAt?: string | null;
+            optedOutAt?: string | null;
+        };
+        user?: {
+            name?: string | null;
+            email?: string | null;
+        } | null;
+    }>>([]);
     const [selectedConvoId, setSelectedConvoId] = useState<string | null>(null);
     const [loading, setLoading] = useState(true);
     const [filter, setFilter] = useState("open");
+    const [refreshTick, setRefreshTick] = useState(0);
 
     useEffect(() => {
         async function fetchConversations() {
@@ -35,7 +58,15 @@ export function InboxTab() {
         // Poll for new messages every 10 seconds (simplistic real-time)
         const interval = setInterval(fetchConversations, 10000);
         return () => clearInterval(interval);
-    }, [slug, filter]);
+    }, [slug, filter, refreshTick]);
+
+    useEffect(() => {
+        if (!selectedConvoId) return;
+        const stillExists = conversations.some((item) => item.id === selectedConvoId);
+        if (!stillExists) {
+            setSelectedConvoId(null);
+        }
+    }, [conversations, selectedConvoId]);
 
     const selectedConvo = conversations.find(c => c.id === selectedConvoId);
 
@@ -98,7 +129,10 @@ export function InboxTab() {
             {/* Chat Pane */}
             <div className="flex-1 bg-black/20 overflow-hidden relative">
                 {selectedConvoId ? (
-                    <ChatPane conversation={selectedConvo} />
+                    <ChatPane
+                        conversation={selectedConvo ?? null}
+                        onConversationUpdated={() => setRefreshTick((prev) => prev + 1)}
+                    />
                 ) : (
                     <div className="h-full flex flex-col items-center justify-center p-12 text-center">
                         <div className="w-24 h-24 rounded-full bg-white/[0.02] border border-white/[0.05] flex items-center justify-center mb-6">
