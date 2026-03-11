@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import {
     getAgencyOrgSlug,
+    hashPassword,
     resolveAuthContext,
     setSessionCookie,
     type AuthScope,
@@ -29,6 +30,11 @@ interface LoginOptions {
     requireScope?: AuthScope;
 }
 
+interface AdminBootstrapCredentials {
+    email: string;
+    password: string;
+}
+
 function normalizeSessionRole(role: string): SessionPayload["role"] | null {
     const normalized = role.toLowerCase() as SessionPayload["role"];
     return VALID_SESSION_ROLES.has(normalized) ? normalized : null;
@@ -40,6 +46,81 @@ function isAgencyOrganization(orgSlug: string): boolean {
 
 function unauthorizedResponse() {
     return NextResponse.json({ error: "Credenciais inválidas" }, { status: 401 });
+}
+
+function resolveAdminBootstrapCredentials(): AdminBootstrapCredentials | null {
+    const email = (process.env.ADMIN_EMAIL ?? process.env.INITIAL_ADMIN_EMAIL ?? "").trim().toLowerCase();
+    const password = (process.env.ADMIN_PASSWORD ?? process.env.INITIAL_ADMIN_PASSWORD ?? "").trim();
+
+    if (!email || !password) {
+        return null;
+    }
+
+    return { email, password };
+}
+
+async function ensureAgencyAdminBootstrap(email: string, options: LoginOptions): Promise<void> {
+    if (options.requireScope !== "agency") {
+        return;
+    }
+
+    const bootstrap = resolveAdminBootstrapCredentials();
+    if (!bootstrap || bootstrap.email !== email) {
+        return;
+    }
+
+    const existingUser = await prisma.user.findUnique({
+        where: { email: bootstrap.email },
+        select: { id: true },
+    });
+
+    if (existingUser) {
+        return;
+    }
+
+    const agencyOrgSlug = getAgencyOrgSlug();
+    const organization = await prisma.organization.upsert({
+        where: { slug: agencyOrgSlug },
+        update: {},
+        create: {
+            name: "InovaCortex",
+            slug: agencyOrgSlug,
+            plan: "enterprise",
+            industry: "Technology",
+            maxAssessmentsPerMonth: 1000,
+            maxUsers: 100,
+        },
+        select: { id: true, slug: true },
+    });
+
+    const passwordHash = await hashPassword(bootstrap.password);
+
+    try {
+        await prisma.user.create({
+            data: {
+                email: bootstrap.email,
+                passwordHash,
+                role: "admin",
+                organizationId: organization.id,
+            },
+        });
+
+        logger.info("Agency admin bootstrap user created on login", {
+            endpoint: options.endpoint,
+            orgSlug: organization.slug,
+            email: bootstrap.email,
+        });
+    } catch (error) {
+        // Ignore unique race condition if another request created the same user concurrently.
+        const code =
+            typeof error === "object" && error !== null && "code" in error
+                ? String((error as { code?: unknown }).code ?? "")
+                : "";
+
+        if (code !== "P2002") {
+            throw error;
+        }
+    }
 }
 
 export async function loginWithPassword(
@@ -54,6 +135,8 @@ export async function loginWithPassword(
         if (!email || !password) {
             return NextResponse.json({ error: "Email e senha obrigatórios" }, { status: 400 });
         }
+
+        await ensureAgencyAdminBootstrap(email, options);
 
         const user = await prisma.user.findUnique({
             where: { email },
