@@ -1,10 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { logAudit } from "@/lib/audit";
+import { logAudit, writeAuditEvent } from "@/lib/audit";
 import { logger } from "@/lib/logger";
 import { generateContract } from "@/lib/contract-engine";
 import { createCheckoutForProposal } from "@/lib/billing";
 import { sendWhatsAppMessage } from "@/lib/whatsapp";
+import { getBaseUrl } from "@/lib/runtime/base-url";
 
 export const runtime = "nodejs";
 
@@ -109,20 +110,21 @@ export async function POST(
         });
 
         contractSlug = contractOutput.publicSlug;
-        const baseUrl = process.env.NEXT_PUBLIC_BASE_URL ?? "http://localhost:3000";
+        const baseUrl = getBaseUrl();
         contractViewUrl = `${baseUrl}/contrato/${contractSlug}`;
 
-        await (prisma as any).auditEvent.create({
-            data: {
-                organizationId: orgId,
-                action: "contractGenerated",
-                userId: "system:accept-flow",
-                resourceType: "contract",
-                resourceId: contractSlug,
-                details: JSON.stringify({ proposalId: proposal.id }),
-                ipAddress: "system",
+        await writeAuditEvent({
+            organizationId: orgId,
+            assessmentId: proposal.assessmentId,
+            action: "contractGenerated",
+            details: {
+                proposalId: proposal.id,
+                contractSlug,
+                source: "system:accept-flow",
             },
-        }).catch(() => null);
+            strict: true,
+            context: { proposalId: proposal.id, contractSlug },
+        });
 
     } catch (err: any) {
         logger.error("Contract generation failed (non-fatal)", { error: err.message, proposalId: proposal.id });
@@ -177,7 +179,6 @@ export async function POST(
     try {
         const phone = assessment.phone;
         if (phone) {
-            const baseUrl = process.env.NEXT_PUBLIC_BASE_URL ?? "http://localhost:3000";
             const lines = [
                 `🎉 *Proposta Aceita — Próximos Passos*`,
                 ``,

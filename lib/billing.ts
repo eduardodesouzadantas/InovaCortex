@@ -12,6 +12,8 @@
 
 import { prisma } from "@/lib/prisma";
 import { logger } from "@/lib/logger";
+import { getBaseUrl } from "@/lib/runtime/base-url";
+import { writeAuditEvent } from "@/lib/audit";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -54,7 +56,7 @@ export async function createCheckoutForProposal(
     }
 
     const isStripeEnabled = !!process.env.STRIPE_SECRET_KEY;
-    const baseUrl = process.env.NEXT_PUBLIC_BASE_URL ?? "http://localhost:3000";
+    const baseUrl = getBaseUrl();
 
     if (isStripeEnabled) {
         return createStripeCheckout(orgId, proposalId, opts, baseUrl);
@@ -71,7 +73,11 @@ async function createStripeCheckout(
     baseUrl: string,
 ): Promise<CheckoutResult> {
     try {
-        const stripe = await importStripe();
+        const stripeSecretKey = process.env.STRIPE_SECRET_KEY;
+        if (!stripeSecretKey) {
+            throw new Error("STRIPE_SECRET_KEY_MISSING");
+        }
+        const stripe = await importStripe(stripeSecretKey);
 
         const session = await stripe.checkout.sessions.create({
             mode: "payment",
@@ -153,23 +159,23 @@ async function createStubCheckout(
 
 // ─── Stripe lazy loader ───────────────────────────────────────────────────────
 
-async function importStripe() {
+async function importStripe(secretKey: string) {
     const { default: Stripe } = await import("stripe");
-    return new Stripe(process.env.STRIPE_SECRET_KEY!, { apiVersion: "2026-02-25.clover" });
+    return new Stripe(secretKey, { apiVersion: "2026-02-25.clover" });
 }
 
 // ─── Audit helper ─────────────────────────────────────────────────────────────
 
 async function audit(orgId: string, proposalId: string, action: string, details: object) {
-    await (prisma as any).auditEvent.create({
-        data: {
-            organizationId: orgId,
-            action,
-            userId: "system:billing",
-            resourceType: "billing_record",
-            resourceId: proposalId,
-            details: JSON.stringify(details),
-            ipAddress: "system",
+    await writeAuditEvent({
+        organizationId: orgId,
+        action,
+        details: {
+            proposalId,
+            source: "system:billing",
+            ...details,
         },
-    }).catch(() => null); // non-blocking
+        strict: true,
+        context: { proposalId },
+    });
 }

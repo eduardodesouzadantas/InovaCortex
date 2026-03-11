@@ -16,6 +16,7 @@
 
 import { createHash } from "crypto";
 import { logger } from "@/lib/logger";
+import { getBaseUrl } from "@/lib/runtime/base-url";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -313,7 +314,7 @@ export async function createDealPacket(
         .digest("hex")
         .slice(0, 12);
 
-    const baseUrl = process.env.NEXT_PUBLIC_BASE_URL ?? "https://inovacortex.com.br";
+    const baseUrl = getBaseUrl();
 
     // Build one-pager data
     const onePagerData = buildExecOnePagerData(assessment, roiProjection, proofStats, tier, baseUrl);

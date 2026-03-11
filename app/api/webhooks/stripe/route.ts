@@ -26,7 +26,12 @@ export async function POST(request: NextRequest) {
 
     if (webhookSecret) {
         try {
-            const stripe = await importStripe();
+            const stripeSecretKey = process.env.STRIPE_SECRET_KEY;
+            if (!stripeSecretKey) {
+                logger.warn("Stripe webhook secret configured but STRIPE_SECRET_KEY is missing");
+                return NextResponse.json({ error: "Stripe is not fully configured" }, { status: 503 });
+            }
+            const stripe = await importStripe(stripeSecretKey);
             event = stripe.webhooks.constructEvent(rawBody, sig, webhookSecret);
         } catch (err: any) {
             logger.error("Stripe webhook signature verification failed", { error: err.message });
@@ -101,7 +106,7 @@ export async function POST(request: NextRequest) {
     }
 }
 
-async function importStripe() {
+async function importStripe(secretKey: string) {
     const { default: Stripe } = await import("stripe");
-    return new Stripe(process.env.STRIPE_SECRET_KEY!, { apiVersion: "2026-02-25.clover" });
+    return new Stripe(secretKey, { apiVersion: "2026-02-25.clover" });
 }

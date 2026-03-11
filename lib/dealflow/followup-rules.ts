@@ -11,6 +11,7 @@
  */
 
 import { logger } from "@/lib/logger";
+import { getBaseUrl } from "@/lib/runtime/base-url";
 
 export type FollowUpAction =
     | "send_consultive_followup"
@@ -79,7 +80,7 @@ export function evaluateFollowUp(signals: SignalSummary): FollowUpDecision {
 // ─── Message Templates ────────────────────────────────────────────────────────
 
 export function buildConsultiveFollowup(companyName: string, execSlug: string): string {
-    const baseUrl = process.env.NEXT_PUBLIC_BASE_URL ?? "https://inovacortex.com.br";
+    const baseUrl = getBaseUrl();
     return `Olá! Passando para dar um oi — vi que você teve a chance de conferir a análise que preparei para ${companyName}.
 
 Queria entender: teve alguma dúvida sobre o que foi apresentado? Às vezes a parte de ROI levanta perguntas sobre como chegamos nesses números.
@@ -105,7 +106,7 @@ export function buildBriefingToOwner(
     companyName: string, segment: string, tierLabel: string,
     execSlug: string, roiSnapshot?: string,
 ): string {
-    const baseUrl = process.env.NEXT_PUBLIC_BASE_URL ?? "https://inovacortex.com.br";
+    const baseUrl = getBaseUrl();
     let roiLines = "";
     if (roiSnapshot) {
         try {

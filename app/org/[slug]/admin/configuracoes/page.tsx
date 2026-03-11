@@ -94,7 +94,7 @@ export default async function OrgConfiguracoesPage({
                 </div>
 
                 {/* Reuse the existing form component */}
-                <MetaSettingsForm initialValues={currentValues} />
+                <MetaSettingsForm initialValues={currentValues} orgSlug={slug} />
 
                 {/* AI Keys info */}
                 <div className="bg-white/3 border border-white/8 rounded-xl p-4 text-xs text-muted-foreground space-y-2">

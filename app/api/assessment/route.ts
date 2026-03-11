@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 export const runtime = "nodejs";
 
 import { NextResponse } from "next/server";
@@ -7,7 +8,7 @@ import { prisma } from "@/lib/prisma";
 import crypto from "crypto";
 import { calculateROI } from "@/lib/roi-engine";
 import { checkAssessmentLimit, LimitExceededError } from "@/lib/auth/limits";
-import { trackUsage } from "@/lib/usage";
+import { sendAssessmentDossierWhatsApp } from "@/lib/whatsapp/assessment-send";
 
 // In-memory rate limiting and rudimentary spam protection
 const rateLimitMap = new Map<string, { count: number; lastModified: number }>();
@@ -61,14 +62,21 @@ export async function POST(request: Request) {
 
         const body = await request.json();
 
-        // V9: Resolve organizationId from ?org query param
+        // Resolve organization from ?org query param; fallback to default slug only when not provided.
         const { searchParams } = new URL(request.url);
-        const orgSlug = searchParams.get("org") ?? "inovacortex";
+        const requestedOrgSlug = (searchParams.get("org") || "").trim();
+        const resolvedOrgSlug = requestedOrgSlug || "inovacortex";
         const org = await (prisma as any).organization.findUnique({
-            where: { slug: orgSlug },
+            where: { slug: resolvedOrgSlug },
         });
-        const organizationId: string = org?.id ?? "default-org-id";
-        const maxPerMonth: number = org?.maxAssessmentsPerMonth ?? 50;
+        if (!org) {
+            return NextResponse.json(
+                { error: requestedOrgSlug ? "Invalid organization" : "Default organization not configured" },
+                { status: requestedOrgSlug ? 400 : 500 }
+            );
+        }
+        const organizationId: string = org.id;
+        const maxPerMonth: number = org.maxAssessmentsPerMonth;
 
         // 1. Billing limit check (before validation to fail fast)
         await checkAssessmentLimit(organizationId, maxPerMonth);
@@ -216,16 +224,11 @@ export async function POST(request: Request) {
             return newAssessment;
         });
 
-        // 4.5. Trigger WhatsApp Loop V3 (Async, don't await blocking the response)
+        // 4.5. Trigger WhatsApp Loop V3 (async, non-blocking)
         if (assessment.whatsappConsent && assessment.phone) {
             // Note: Em produção real isso deve ir pra uma Queue/Worker. 
-            // Para V3, chamaremos a API interna assincronamente (Fire and Forget) usando absolute URL from request
-            const originUrl = new URL(request.url).origin;
-            fetch(`${originUrl}/api/whatsapp/send`, {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ assessmentId: assessment.id })
-            }).catch(e => console.error("Fire-and-forget WhatsApp Failed:", e));
+            // Para V3, chamamos diretamente o helper para evitar acoplamento com rota legacy.
+            void sendAssessmentDossierWhatsApp({ assessmentId: assessment.id });
         }
 
         // 5. Response

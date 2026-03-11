@@ -2,14 +2,21 @@ import { redirect } from "next/navigation";
 import { prisma } from "@/lib/prisma";
 import ExecutionClient from "./execution-client";
 import { getCurrentUser } from "@/lib/auth/server-utils";
+import { getAuthContext } from "@/lib/auth/session";
+import { isAgencyMonitoringNamespaceEnabled } from "@/lib/agency/monitoring/flag";
 
 export const metadata = {
     title: "Execution Center | InovaCortex",
 };
 
 export default async function ExecutionCenterPage({ params }: { params: { slug: string } }) {
+    const auth = await getAuthContext();
+    if (isAgencyMonitoringNamespaceEnabled() && auth.isAuthenticated && auth.authScope === "agency") {
+        redirect("/agency/monitoring");
+    }
+
     const user = await getCurrentUser();
-    if (!user || user.organization?.slug !== params.slug) redirect("/login");
+    if (!user || user.organization?.slug !== params.slug) redirect(`/org/${params.slug}/admin/login`);
 
     // Fetch initial data
     const playbooks = await prisma.playbook.findMany({

@@ -1,5 +1,6 @@
 import { generateText } from "ai";
 import { createOpenAI } from "@ai-sdk/openai";
+import { logger } from "@/lib/logger";
 
 interface AssessmentContext {
   name: string;
@@ -29,12 +30,46 @@ export interface PreSalesResult {
   };
 }
 
+function buildStubPreSalesResult(assessment: AssessmentContext): PreSalesResult {
+  return {
+    executiveSummary: [
+      `${assessment.company} possui oportunidade relevante de eficiência em ${assessment.segment}.`,
+      "OPENAI_API_KEY não configurada: resultado gerado em modo degradado para manter continuidade operacional.",
+      `Foco imediato: consolidar dores (${assessment.pains.slice(0, 3).join(", ") || "operações críticas"}) e validar metas de curto prazo.`,
+    ].join(" "),
+    diagnosticQuestions: [
+      "Qual processo atual gera maior perda de receita ou retrabalho?",
+      "Qual canal concentra maior volume e pior tempo de resposta?",
+      "Quais integrações são obrigatórias para começar sem fricção?",
+      "Qual meta executiva será usada para medir o sucesso em 30 dias?",
+      "Quem será o responsável por operação e governança da implantação?",
+      "Quais riscos podem atrasar a adoção nas primeiras semanas?",
+      "Quais decisões dependem de visibilidade em tempo real no cockpit?",
+    ],
+    initialArchitecture: {
+      blocks: [
+        { title: "Orquestração Comercial", description: "Coordena pipeline, prioridades e próximas ações." },
+        { title: "Automação Operacional", description: "Executa playbooks e reduz tarefas manuais recorrentes." },
+      ],
+      integrations: assessment.stack.length > 0 ? assessment.stack.slice(0, 4) : ["CRM", "WhatsApp Business API"],
+      roadmap: [
+        { week: "Semana 1-2", action: "Mapeamento de gargalos e baseline de métricas." },
+        { week: "Semana 3-4", action: "Integrações críticas e ativação do primeiro ciclo operacional." },
+      ],
+    },
+  };
+}
+
 export async function generatePreSalesArtifacts(
   assessment: AssessmentContext
 ): Promise<PreSalesResult> {
   const apiKey = process.env.OPENAI_API_KEY;
   if (!apiKey) {
-    throw new Error("OPENAI_API_KEY not configured. Please add it to your .env file.");
+    logger.warn("OPENAI_API_KEY not configured; using legacy pre-sales stub output", {
+      mode: "degraded",
+      company: assessment.company,
+    });
+    return buildStubPreSalesResult(assessment);
   }
 
   const openai = createOpenAI({ apiKey });

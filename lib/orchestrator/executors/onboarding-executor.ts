@@ -18,6 +18,8 @@ import { sendWhatsAppMessage } from "@/lib/whatsapp";
 import { createOrUpdateEventWithMeet } from "@/lib/integrations/google-calendar";
 import { logger } from "@/lib/logger";
 import type { AgentImplementation, OrchestratorContext } from "@/lib/orchestrator/types";
+import { getBaseUrl } from "@/lib/runtime/base-url";
+import { writeAuditEvent } from "@/lib/audit";
 
 // ─── Payload (from on-payment-confirmed) ─────────────────────────────────────
 
@@ -56,7 +58,7 @@ async function sendOnboardingPack(
     workspaceId: string,
 ): Promise<{ success: boolean; data?: any; error?: string }> {
     const context = await loadContext(orgId, proposalId, workspaceId);
-    const baseUrl = process.env.NEXT_PUBLIC_BASE_URL ?? "https://app.inovacortex.com.br";
+    const baseUrl = getBaseUrl();
     const calendlyUrl = process.env.NEXT_PUBLIC_CALENDLY_URL ?? null;
 
     // V19: Client portal URL with magic token
@@ -172,7 +174,7 @@ async function sendOnboardingReminder(
     workspaceId: string,
 ): Promise<{ success: boolean; data?: any; error?: string }> {
     const context = await loadContext(orgId, proposalId, workspaceId);
-    const baseUrl = process.env.NEXT_PUBLIC_BASE_URL ?? "https://app.inovacortex.com.br";
+    const baseUrl = getBaseUrl();
     const portalUrl = context.publicToken
         ? `${baseUrl}/org/${context.orgSlug}/workspace/${workspaceId}?t=${context.publicToken}`
         : `${baseUrl}/org/${context.orgSlug}/admin`;
@@ -279,17 +281,17 @@ function getNextBusinessDayAt10(from: Date): Date {
 async function sendMessageSafe(orgId: string, phone: string | null, body: string, actionType: string) {
     if (!phone) {
         logger.info(`[ONBOARDING] No phone for ${actionType} — skipping WhatsApp`, { orgId });
-        await (prisma as any).auditEvent.create({
-            data: {
-                organizationId: orgId,
-                action: "onboardingSkippedNoPhone",
-                userId: "system:onboarding-executor",
-                resourceType: "whatsapp",
-                resourceId: actionType,
-                details: JSON.stringify({ reason: "no_phone" }),
-                ipAddress: "system",
+        await writeAuditEvent({
+            organizationId: orgId,
+            action: "onboardingSkippedNoPhone",
+            details: {
+                reason: "no_phone",
+                actionType,
+                source: "system:onboarding-executor",
             },
-        }).catch(() => null);
+            strict: true,
+            context: { actionType },
+        });
         return;
     }
     try {
@@ -300,17 +302,17 @@ async function sendMessageSafe(orgId: string, phone: string | null, body: string
 }
 
 async function audit(orgId: string, proposalId: string, action: string, details: object) {
-    await (prisma as any).auditEvent.create({
-        data: {
-            organizationId: orgId,
-            action,
-            userId: "system:onboarding-executor",
-            resourceType: "client_workspace",
-            resourceId: proposalId,
-            details: JSON.stringify(details),
-            ipAddress: "system",
+    await writeAuditEvent({
+        organizationId: orgId,
+        action,
+        details: {
+            proposalId,
+            source: "system:onboarding-executor",
+            ...details,
         },
-    }).catch(() => null);
+        strict: true,
+        context: { proposalId },
+    });
 }
 
 // ─── Agent Registration ───────────────────────────────────────────────────────

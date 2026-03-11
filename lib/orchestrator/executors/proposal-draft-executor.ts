@@ -14,6 +14,8 @@ import { generateProposal } from "@/lib/proposal-engine";
 import { sendWhatsAppMessage } from "@/lib/whatsapp";
 import type { AgentImplementation, OrchestratorContext } from "@/lib/orchestrator/types";
 import { logProposalSent, recommendSendAt } from "@/lib/services/deal-optimization/send-window";
+import { getBaseUrl } from "@/lib/runtime/base-url";
+import { writeAuditEvent } from "@/lib/audit";
 
 
 // ─── Payload (what brainCycle enqueues) ──────────────────────────────────────
@@ -126,34 +128,35 @@ async function runProposalDraftExecutor(
 
     // ── 10. Audit Events ──────────────────────────────────────────────────────
     await Promise.all([
-        (prisma as any).auditEvent.create({
-            data: {
-                organizationId: orgId,
-                action: "proposalDraftGenerated",
-                userId: "system:proposal-draft-executor",
-                resourceType: "proposal",
-                resourceId: proposal.id,
-                details: JSON.stringify({
-                    meetingSessionId,
-                    assessmentId: assessment.id,
-                    version: generated.version,
-                    modulesCount: generated.modules.length,
-                    pricingMin: generated.pricingEstimate.minBRL,
-                    pricingMax: generated.pricingEstimate.maxBRL,
-                }),
-                ipAddress: "system",
+        writeAuditEvent({
+            organizationId: orgId,
+            assessmentId: assessment.id,
+            action: "proposalDraftGenerated",
+            details: {
+                meetingSessionId,
+                proposalId: proposal.id,
+                reviewRequestId: reviewRequest.id,
+                version: generated.version,
+                modulesCount: generated.modules.length,
+                pricingMin: generated.pricingEstimate.minBRL,
+                pricingMax: generated.pricingEstimate.maxBRL,
+                source: "system:proposal-draft-executor",
             },
+            strict: true,
+            context: { meetingSessionId, proposalId: proposal.id },
         }),
-        (prisma as any).auditEvent.create({
-            data: {
-                organizationId: orgId,
-                action: "reviewRequested",
-                userId: "system:proposal-draft-executor",
-                resourceType: "review_request",
-                resourceId: reviewRequest.id,
-                details: JSON.stringify({ entityType: "proposal", entityId: proposal.id }),
-                ipAddress: "system",
+        writeAuditEvent({
+            organizationId: orgId,
+            assessmentId: assessment.id,
+            action: "reviewRequested",
+            details: {
+                entityType: "proposal",
+                entityId: proposal.id,
+                reviewRequestId: reviewRequest.id,
+                source: "system:proposal-draft-executor",
             },
+            strict: true,
+            context: { proposalId: proposal.id, reviewRequestId: reviewRequest.id },
         }),
     ]);
 
@@ -191,21 +194,20 @@ async function runProposalDraftExecutor(
             },
         });
 
-        await (prisma as any).auditEvent.create({
-            data: {
-                organizationId: orgId,
-                action: "sendWindowScheduled",
-                userId: "system:proposal-draft-executor",
-                resourceType: "proposal",
-                resourceId: proposal.id,
-                details: JSON.stringify({
-                    bestHour: windowResult.bestHour,
-                    fallback: windowResult.fallback,
-                    scheduledSendAt: scheduledSendAt.toISOString(),
-                }),
-                ipAddress: "system",
+        await writeAuditEvent({
+            organizationId: orgId,
+            assessmentId: assessment.id,
+            action: "sendWindowScheduled",
+            details: {
+                proposalId: proposal.id,
+                bestHour: windowResult.bestHour,
+                fallback: windowResult.fallback,
+                scheduledSendAt: scheduledSendAt.toISOString(),
+                source: "system:proposal-draft-executor",
             },
-        }).catch(() => null);
+            strict: true,
+            context: { proposalId: proposal.id },
+        });
     }
 
     // ── 13. Notify owner via WhatsApp (non-blocking, best-effort) ────────────
@@ -242,7 +244,7 @@ async function notifyOwner(
 
         const priorityFlag = highPriority ? "🚨 *ALTA PRIORIDADE* — " : "";
         const sessionRef = session.leadEmail ?? `sessão ${session.id.slice(0, 8)}`;
-        const baseUrl = process.env.NEXT_PUBLIC_BASE_URL ?? "https://app.inovacortex.com.br";
+        const baseUrl = getBaseUrl();
         const reviewUrl = `${baseUrl}/admin/proposals/${proposal.id}`;
 
         const scheduleInfo = scheduledSendAt

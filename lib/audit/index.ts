@@ -19,15 +19,74 @@ export type AuditEntityType =
     | "whatsapp"
     | "system";
 
+export interface WriteAuditEventInput {
+    organizationId: string;
+    action: string;
+    assessmentId?: string | null;
+    details?: unknown;
+    strict?: boolean;
+    context?: Record<string, unknown>;
+}
+
+function serializeDetails(details: unknown): string | null {
+    if (details === undefined || details === null) {
+        return null;
+    }
+    if (typeof details === "string") {
+        return details;
+    }
+    try {
+        return JSON.stringify(details);
+    } catch {
+        return String(details);
+    }
+}
+
+function resolveOrganizationId(metadata?: Record<string, unknown>): string {
+    const fromMetadata = metadata?.organizationId ?? metadata?.orgId;
+    if (typeof fromMetadata === "string" && fromMetadata.trim().length > 0) {
+        return fromMetadata.trim();
+    }
+    return "default-org-id";
+}
+
+export async function writeAuditEvent(input: WriteAuditEventInput): Promise<void> {
+    const details = serializeDetails(input.details);
+
+    try {
+        await prisma.auditEvent.create({
+            data: {
+                organizationId: input.organizationId,
+                assessmentId: input.assessmentId ?? null,
+                action: input.action,
+                details,
+            },
+        });
+    } catch (error: any) {
+        logger.error("Failed to persist audit event", {
+            organizationId: input.organizationId,
+            assessmentId: input.assessmentId ?? null,
+            action: input.action,
+            details,
+            context: input.context,
+            error: error?.message ?? String(error),
+        });
+
+        if (input.strict) {
+            throw error;
+        }
+    }
+}
+
 export async function logAudit(
     entityType: AuditEntityType,
     entityId: string,
     action: string,
-    metadata?: Record<string, unknown>
+    metadata?: Record<string, unknown>,
 ): Promise<void> {
     try {
         // Map to the existing AuditEvent table (assessmentId = entityId for assessment-linked events)
-        // For global events (token updates etc.), we'll use a special sentinel assessmentId
+        // For global events (token updates etc.), emit structured app log.
         const isAssessmentLinked = entityType === "assessment" ||
             entityType === "dossier" ||
             entityType === "pdf" ||
@@ -36,22 +95,24 @@ export async function logAudit(
             entityType === "status";
 
         if (isAssessmentLinked) {
-            await (prisma as any).auditEvent.create({
-                data: {
-                    assessmentId: entityId,
-                    action: `${entityType}:${action}`,
-                    details: metadata ? JSON.stringify(metadata) : null,
-                },
+            await writeAuditEvent({
+                organizationId: resolveOrganizationId(metadata),
+                assessmentId: entityId,
+                action: `${entityType}:${action}`,
+                details: metadata ?? null,
+                strict: false,
+                context: { entityType, entityId },
             });
-        } else {
-            // For system-level events (token changes, etc.) — store in SystemSetting as a special key
-            // In a production system you'd have a separate GlobalAuditEvent model
-            logger.info(`[AUDIT] ${entityType}:${action}`, { entityId, ...metadata });
+            return;
         }
+
+        logger.info(`[AUDIT] ${entityType}:${action}`, { entityId, ...metadata });
     } catch (err: any) {
         // Never let audit failures crash the main flow
         logger.warn("Failed to write audit event", {
-            entityType, entityId, action,
+            entityType,
+            entityId,
+            action,
             error: err?.message,
         });
     }

@@ -18,6 +18,7 @@
 import { prisma } from "@/lib/prisma";
 import { provisionWorkspace } from "@/lib/provisioning";
 import { logger } from "@/lib/logger";
+import { writeAuditEvent } from "@/lib/audit";
 
 // ─── Main Handler ─────────────────────────────────────────────────────────────
 
@@ -137,15 +138,15 @@ export async function onPaymentConfirmed(
 // ─── Audit helper ─────────────────────────────────────────────────────────────
 
 async function audit(orgId: string, proposalId: string, action: string, details: object) {
-    await (prisma as any).auditEvent.create({
-        data: {
-            organizationId: orgId,
-            action,
-            userId: "system:on-payment-confirmed",
-            resourceType: "billing_record",
-            resourceId: proposalId,
-            details: JSON.stringify(details),
-            ipAddress: "system",
+    await writeAuditEvent({
+        organizationId: orgId,
+        action,
+        details: {
+            proposalId,
+            source: "system:on-payment-confirmed",
+            ...details,
         },
-    }).catch(() => null);
+        strict: true,
+        context: { proposalId },
+    });
 }

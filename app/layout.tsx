@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { Inter } from "next/font/google";
+import { headers } from "next/headers";
 import "./globals.css";
 import { ThemeProvider } from "@/components/theme-provider";
 import { Navbar } from "@/components/navbar";
@@ -34,11 +35,24 @@ export const metadata: Metadata = {
 
 import { WhatsAppButton } from "@/components/whatsapp-button";
 
-export default function RootLayout({
+function isAgencyPath(pathname: string): boolean {
+  return pathname === "/agency" || pathname.startsWith("/agency/");
+}
+
+export default async function RootLayout({
   children,
 }: Readonly<{
   children: React.ReactNode;
 }>) {
+  const headersList = await headers();
+  const invokePath =
+    headersList.get("x-invoke-path") ||
+    headersList.get("x-matched-path") ||
+    headersList.get("next-url") ||
+    "";
+
+  const agencyLayer = isAgencyPath(invokePath);
+
   return (
     <html lang="pt-BR" suppressHydrationWarning>
       <body
@@ -50,12 +64,18 @@ export default function RootLayout({
           enableSystem
           disableTransitionOnChange
         >
-          <div className="relative flex min-h-screen flex-col">
-            <Navbar />
-            <main className="flex-1">{children}</main>
-            <Footer />
-          </div>
-          <WhatsAppButton />
+          {agencyLayer ? (
+            <main className="min-h-screen">{children}</main>
+          ) : (
+            <>
+              <div className="relative flex min-h-screen flex-col">
+                <Navbar />
+                <main className="flex-1">{children}</main>
+                <Footer />
+              </div>
+              <WhatsAppButton />
+            </>
+          )}
         </ThemeProvider>
       </body>
     </html>

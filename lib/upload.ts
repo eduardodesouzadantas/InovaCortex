@@ -53,7 +53,17 @@ export async function storeUpload(input: StoreUploadInput): Promise<StoreUploadR
     let stub = false;
 
     if (isS3Enabled()) {
-        url = await storeS3(workspaceId, uniqueName, buffer, mimeType);
+        try {
+            url = await storeS3(workspaceId, uniqueName, buffer, mimeType);
+        } catch (error) {
+            logger.warn("[UPLOAD] S3 storage unavailable; falling back to local stub", {
+                workspaceId,
+                filename: uniqueName,
+                error: error instanceof Error ? error.message : String(error),
+            });
+            url = await storeLocal(workspaceId, uniqueName, buffer);
+            stub = true;
+        }
     } else {
         url = await storeLocal(workspaceId, uniqueName, buffer);
         stub = true;
@@ -90,17 +100,24 @@ async function storeLocal(workspaceId: string, filename: string, buffer: Buffer)
 // ─── S3/R2 Placeholder ────────────────────────────────────────────────────────
 
 async function storeS3(workspaceId: string, filename: string, buffer: Buffer, mimeType?: string): Promise<string> {
+    const accessKeyId = process.env.AWS_ACCESS_KEY_ID;
+    const secretAccessKey = process.env.AWS_SECRET_ACCESS_KEY;
+    const bucket = process.env.UPLOAD_S3_BUCKET;
+
+    if (!accessKeyId || !secretAccessKey || !bucket) {
+        throw new Error("UPLOAD_S3_CONFIG_MISSING");
+    }
+
     const client = new S3Client({
         region: process.env.AWS_REGION ?? "us-east-1",
         credentials: {
-            accessKeyId: process.env.AWS_ACCESS_KEY_ID!,
-            secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY!,
+            accessKeyId,
+            secretAccessKey,
         },
         // For Cloudflare R2, override endpoint:
         ...(process.env.UPLOAD_S3_ENDPOINT ? { endpoint: process.env.UPLOAD_S3_ENDPOINT } : {}),
     });
 
-    const bucket = process.env.UPLOAD_S3_BUCKET!;
     const key = `workspaces/${workspaceId}/${filename}`;
 
     await client.send(new PutObjectCommand({
@@ -118,7 +135,11 @@ async function storeS3(workspaceId: string, filename: string, buffer: Buffer, mi
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 function isS3Enabled(): boolean {
-    return !!(process.env.UPLOAD_S3_BUCKET && process.env.AWS_ACCESS_KEY_ID);
+    return !!(
+        process.env.UPLOAD_S3_BUCKET &&
+        process.env.AWS_ACCESS_KEY_ID &&
+        process.env.AWS_SECRET_ACCESS_KEY
+    );
 }
 
 function sanitizeFilename(name: string): string {

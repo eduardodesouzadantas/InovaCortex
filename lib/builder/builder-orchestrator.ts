@@ -14,6 +14,8 @@
 
 import { logger } from "@/lib/logger";
 import { sendWhatsAppMessage } from "@/lib/whatsapp";
+import { writeAuditEvent } from "@/lib/audit";
+import { getBaseUrl } from "@/lib/runtime/base-url";
 import { checkBuilderAccess } from "./builder-guard";
 import { buildPromptPack, persistPromptPack } from "./prompt-pack";
 
@@ -32,18 +34,17 @@ export async function logBuilderAudit(
     event: BuilderAuditEvent,
     meta?: Record<string, unknown>,
 ): Promise<void> {
-    const { prisma } = await import("@/lib/prisma");
     try {
-        await (prisma as any).auditEvent.create({
-            data: {
-                organizationId: orgId,
-                action: `builder:${event}`,
-                userId: "system",
-                resourceType: "build_run",
-                resourceId: runId,
-                details: meta ? JSON.stringify(meta) : null,
-                ipAddress: "system",
+        await writeAuditEvent({
+            organizationId: orgId,
+            action: `builder:${event}`,
+            details: {
+                runId,
+                source: "system:builder-orchestrator",
+                ...(meta ?? {}),
             },
+            strict: true,
+            context: { runId, event },
         });
     } catch (err: any) {
         logger.warn("[builder-audit] Failed to write audit event", { event, runId, error: err?.message });
@@ -56,11 +57,11 @@ export interface ReviewNotifyOptions {
     ownerPhone: string;        // E.164 e.g. "5511999998888"
     orgSlug: string;
     runId: string;
-    appUrl?: string;        // defaults to NEXT_PUBLIC_APP_URL
+    appUrl?: string;           // optional override in tests
 }
 
 export async function notifyOwnerReview(opts: ReviewNotifyOptions): Promise<void> {
-    const base = opts.appUrl ?? process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000";
+    const base = opts.appUrl ?? getBaseUrl();
     const runUrl = `${base}/org/${opts.orgSlug}/admin/builder`;
     const approveUrl = `${base}/api/org/${opts.orgSlug}/builder/run/${opts.runId}/approve`;
     const rejectUrl = `${base}/api/org/${opts.orgSlug}/builder/run/${opts.runId}/reject`;

@@ -3,6 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { getStripeClient, STRIPE_PLANS, isStripeEnabled } from "@/lib/stripe";
 import { getSession } from "@/lib/auth/session";
 import { logger } from "@/lib/logger";
+import { getBaseUrl } from "@/lib/runtime/base-url";
 
 export const runtime = "nodejs";
 
@@ -51,12 +52,13 @@ export async function POST(request: NextRequest) {
         });
     }
 
+    const baseUrl = getBaseUrl();
     const checkoutSession = await stripe.checkout.sessions.create({
         customer: customerId,
         mode: "subscription",
         line_items: [{ price: priceId, quantity: 1 }],
-        success_url: `${process.env.NEXT_PUBLIC_APP_URL}/org/${org.slug}/admin/billing?success=1`,
-        cancel_url: `${process.env.NEXT_PUBLIC_APP_URL}/org/${org.slug}/admin/billing?canceled=1`,
+        success_url: `${baseUrl}/org/${org.slug}/admin/billing?success=1`,
+        cancel_url: `${baseUrl}/org/${org.slug}/admin/billing?canceled=1`,
         metadata: { orgId: org.id, plan },
     });
 

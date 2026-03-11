@@ -14,6 +14,7 @@
 
 import { createDealPacket, classifyTier } from "@/lib/dealflow/dealflow-engine";
 import { logger } from "@/lib/logger";
+import { getBaseUrl } from "@/lib/runtime/base-url";
 
 export interface DealflowExecutorContext {
     orgId: string;
@@ -42,7 +43,7 @@ export async function executeGenerateDealPacket(
 
         // Determine if we should send WhatsApp
         const metaToken = process.env.META_WHATSAPP_TOKEN;
-        const baseUrl = process.env.NEXT_PUBLIC_BASE_URL ?? "https://inovacortex.com.br";
+        const baseUrl = getBaseUrl();
 
         const assessment = await (prisma as any).assessment.findUnique({
             where: { id: ctx.assessmentId },

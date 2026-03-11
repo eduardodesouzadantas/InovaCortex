@@ -47,6 +47,43 @@ export type PreSalesResult = z.infer<typeof PreSalesSchema>;
 const MAX_GENERATIONS = 5;         // per assessment lifetime
 const COOLDOWN_SECONDS = 30;       // between generations
 
+function buildStubPreSalesResult(context: AssessmentContext): PreSalesResult {
+    return {
+        executiveSummary: [
+            `${context.company} (${context.segment}) apresenta potencial claro de ganho operacional imediato.`,
+            `Sem OPENAI_API_KEY configurada, o sistema operou em modo degradado e gerou este rascunho seguro para continuidade comercial.`,
+            `Priorize validação de dores críticas (${context.pains.slice(0, 3).join(", ") || "operações e vendas"}),`,
+            `confirmação de baseline de volume (${context.volumeDay}) e definição de metas para os próximos 30 dias.`,
+        ].join(" "),
+        diagnosticQuestions: [
+            "Qual gargalo operacional hoje mais impacta receita e tempo da equipe?",
+            "Quais canais concentram o maior volume e a maior taxa de perda de oportunidades?",
+            "Quais integrações atuais são obrigatórias para ativar o plano sem retrabalho?",
+            "Qual KPI executivo será usado para medir sucesso nas primeiras 4 semanas?",
+            "Qual janela de implantação e quais responsáveis internos estão alocados?",
+        ],
+        architectureProposal: {
+            modules: [
+                {
+                    title: "Sales Command Layer",
+                    description: "Camada para priorizar oportunidades, risco de perda e próximos passos comerciais.",
+                },
+                {
+                    title: "Operational Automation Layer",
+                    description: "Orquestração de tarefas repetitivas e execução de playbooks em canais ativos.",
+                },
+            ],
+            integrations: context.stack.length > 0 ? context.stack.slice(0, 4) : ["CRM", "WhatsApp Business API"],
+            roadmap: [
+                { week: "Semana 1", action: "Baseline de métricas, mapeamento de gargalos e plano de ativação." },
+                { week: "Semana 2", action: "Integrações críticas e validação de dados operacionais." },
+                { week: "Semana 3", action: "Ativação de automações prioritárias e ajustes de funil." },
+                { week: "Semana 4", action: "Revisão executiva de impacto e plano de escala." },
+            ],
+        },
+    };
+}
+
 // ─── Cost Estimation (gpt-4o-mini pricing, per 1M tokens) ───────────────────
 // Input: $0.15/1M | Output: $0.60/1M
 function estimateCost(inputTokens: number, outputTokens: number): number {
@@ -78,7 +115,11 @@ export async function generatePreSalesArtifacts(
 ): Promise<PreSalesResult> {
     const apiKey = process.env.OPENAI_API_KEY;
     if (!apiKey) {
-        throw new Error("OPENAI_API_KEY not configured. Add it to your .env file.");
+        logger.warn("OPENAI_API_KEY not configured; using pre-sales stub output", {
+            assessmentId,
+            mode: "degraded",
+        });
+        return buildStubPreSalesResult(context);
     }
 
     // ─── Rate Limit Check ─────────────────────────────────────────────────

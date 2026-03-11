@@ -17,6 +17,7 @@
 import { prisma } from "@/lib/prisma";
 import { logger } from "@/lib/logger";
 import { sendWhatsAppMessage } from "@/lib/whatsapp";
+import { getBaseUrl } from "@/lib/runtime/base-url";
 import {
     computeScoreTier,
     selectTemplate,
@@ -141,7 +142,7 @@ export async function sendNextStep(
         hours: roi ? Math.round(roi.monthlyHoursRecovered) : 0,
         payback: roi?.estimatedPaybackMonths ?? null,
         closer: opts.closerName ?? "Equipe InovaCortex",
-        dossierLink: opts.dossierLink ?? `${process.env.NEXT_PUBLIC_BASE_URL ?? "https://inovacortex.com.br"}/diagnostico/${assessment?.publicSlug ?? ""}`,
+        dossierLink: opts.dossierLink ?? `${getBaseUrl()}/diagnostico/${assessment?.publicSlug ?? ""}`,
         proposalLink: opts.proposalLink ?? "",
         slotsLeft: opts.slotsLeft ?? 2,
     };

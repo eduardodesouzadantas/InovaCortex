@@ -9,6 +9,7 @@
 import bcrypt from "bcryptjs";
 import { SignJWT, jwtVerify } from "jose";
 import type { NextRequest } from "next/server";
+import { logWarn } from "@/lib/core/observability/logger";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -16,11 +17,23 @@ const BCRYPT_ROUNDS = 12;
 const COOKIE_NAME = "session";
 const SESSION_TTL = 60 * 60 * 24 * 7; // 7 days in seconds
 const DEFAULT_AGENCY_ORG_SLUG = "inovacortex";
+const FALLBACK_JWT_SECRET = "inovacortex-fallback-jwt-secret-not-for-production";
+
+let jwtSecretWarningLogged = false;
 
 function getJwtSecret(): Uint8Array {
     const key = process.env.APP_ENCRYPTION_KEY;
     if (!key) {
-        throw new Error("CRITICAL: APP_ENCRYPTION_KEY environment variable is missing.");
+        if (!jwtSecretWarningLogged) {
+            jwtSecretWarningLogged = true;
+            logWarn("env_warning_missing", {
+                module: "auth-session",
+                message: "[ENV WARNING] APP_ENCRYPTION_KEY not configured",
+                key: "APP_ENCRYPTION_KEY",
+                mode: "degraded",
+            });
+        }
+        return new TextEncoder().encode(FALLBACK_JWT_SECRET);
     }
     return new TextEncoder().encode(key);
 }

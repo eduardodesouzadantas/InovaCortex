@@ -65,7 +65,7 @@ async function getData(slug: string, filters: { status?: string; industry?: stri
 export default async function OutboundAdminPage({ params, searchParams }: Props) {
     let ctx;
     try { ctx = await requireOrgContext(params.slug); }
-    catch { redirect("/admin/login"); }
+    catch { redirect(`/org/${params.slug}/admin/login`); }
 
     const data = await getData(params.slug, searchParams);
     if (!data) notFound();

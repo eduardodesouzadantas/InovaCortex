@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
+import { useSearchParams } from "next/navigation";
 import { useForm, Controller } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { assessmentSchema, AssessmentFormData } from "@/lib/validations/assessment";
@@ -17,6 +18,7 @@ const STEPS = ["Dados Pessoais", "Contexto Operacional", "Stack Tecnológico", "
 
 // Componente principal do Wizard
 export default function AvaliacaoWizard() {
+    const searchParams = useSearchParams();
     const [currentStep, setCurrentStep] = useState(0);
     const [isSubmitting, setIsSubmitting] = useState(false);
     const [result, setResult] = useState<any>(null); // Guardará o retorno da API
@@ -33,6 +35,7 @@ export default function AvaliacaoWizard() {
     });
 
     const { register, control, handleSubmit, trigger, watch, formState: { errors } } = form;
+    const orgSlug = (searchParams.get("org") || "").trim();
 
     // Persistir estado localmente
     useEffect(() => {
@@ -82,7 +85,11 @@ export default function AvaliacaoWizard() {
             role: data.role.trim()
         };
         try {
-            const response = await fetch("/api/assessment", {
+            const endpoint = orgSlug
+                ? `/api/assessment?org=${encodeURIComponent(orgSlug)}`
+                : "/api/assessment";
+
+            const response = await fetch(endpoint, {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify(payload),

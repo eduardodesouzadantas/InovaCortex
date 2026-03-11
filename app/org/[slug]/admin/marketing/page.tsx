@@ -47,7 +47,7 @@ async function getOrgAndPlans(slug: string, filters: { status?: string; platform
 export default async function MarketingAdminPage({ params, searchParams }: Props) {
     let ctx;
     try { ctx = await requireOrgContext(params.slug); }
-    catch { redirect("/admin/login"); }
+    catch { redirect(`/org/${params.slug}/admin/login`); }
 
     const data = await getOrgAndPlans(params.slug, searchParams);
     if (!data) notFound();

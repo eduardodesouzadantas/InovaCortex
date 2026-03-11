@@ -10,6 +10,7 @@
  */
 
 import { logger } from "@/lib/logger";
+import { getBaseUrl } from "@/lib/runtime/base-url";
 import {
     detectICP,
     renderTemplate,
@@ -162,7 +163,7 @@ export async function buildMessage(
                 orderBy: { createdAt: "desc" },
             }).catch(() => null);
             if (dp) {
-                const base = process.env.NEXT_PUBLIC_BASE_URL ?? "https://inovacortex.com.br";
+                const base = getBaseUrl();
                 dealLink = `${base}/deal/${dp.execSlug}`;
             }
         }
