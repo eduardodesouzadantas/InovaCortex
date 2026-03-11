@@ -21,7 +21,7 @@ export default async function AgencyExecutivePackPage() {
                 <p className="text-xs uppercase tracking-[0.18em] text-cyan-400/90">Agency Executive Pack</p>
                 <h1 className="text-2xl font-semibold tracking-tight text-white md:text-3xl">Executive Pack Generator</h1>
                 <p className="max-w-3xl text-sm text-slate-300">
-                    Namespace canônico para geração e leitura: <code>/api/agency/executive-pack/*</code>.
+                    Namespace canÃ´nico para geraÃ§Ã£o e leitura: <code>/api/agency/executive-pack/*</code>.
                 </p>
             </div>
 

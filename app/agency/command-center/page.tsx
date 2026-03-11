@@ -27,7 +27,7 @@ export default async function AgencyCommandCenterPage() {
             <div className="space-y-2">
                 <p className="text-xs uppercase tracking-[0.18em] text-cyan-400/90">Agency Command Center</p>
                 <h1 className="text-2xl font-semibold tracking-tight text-white md:text-3xl">Global Command Center</h1>
-                <p className="max-w-3xl text-sm text-slate-300">Visão operacional global da agência, fora da superfície tenant.</p>
+                <p className="max-w-3xl text-sm text-slate-300">VisÃ£o operacional global da agÃªncia, fora da superfÃ­cie tenant.</p>
             </div>
 
             <div className="grid gap-4 md:grid-cols-4">
