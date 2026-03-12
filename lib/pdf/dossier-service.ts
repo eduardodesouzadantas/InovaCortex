@@ -1,4 +1,3 @@
-import puppeteer from "puppeteer";
 import puppeteerCore from "puppeteer-core";
 import chromium from "@sparticuz/chromium";
 import { prisma } from "@/lib/prisma";
@@ -449,7 +448,7 @@ async function renderPdfBuffer(html: string): Promise<Buffer> {
     let browser: any = null;
     try {
         if (useRemoteBrowser) {
-            browser = await puppeteer.connect({ browserWSEndpoint: wsEndpoint });
+            browser = await puppeteerCore.connect({ browserWSEndpoint: wsEndpoint });
         } else if (isVercel) {
             browser = await puppeteerCore.launch({
                 args: chromium.args,
@@ -458,14 +457,10 @@ async function renderPdfBuffer(html: string): Promise<Buffer> {
                 headless: chromium.headless,
             });
         } else {
-            browser = await puppeteer.launch({
+            // Local fallback (Dev)
+            browser = await puppeteerCore.launch({
                 headless: true,
-                args: [
-                    "--no-sandbox",
-                    "--disable-setuid-sandbox",
-                    "--disable-dev-shm-usage",
-                    "--disable-gpu",
-                ],
+                args: ["--no-sandbox"],
             });
         }
 

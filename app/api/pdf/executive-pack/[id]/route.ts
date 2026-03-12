@@ -8,7 +8,8 @@
  */
 
 import { NextRequest, NextResponse } from "next/server";
-import puppeteer from "puppeteer";
+import puppeteerCore from "puppeteer-core";
+import chromium from "@sparticuz/chromium";
 import { logger } from "@/lib/logger";
 
 export const runtime = "nodejs";
@@ -30,10 +31,27 @@ export async function GET(
         const payload = JSON.parse(pack.payloadJson);
         const { origin } = new URL(req.url);
 
-        const browser = await puppeteer.launch({
-            headless: true,
-            args: ["--no-sandbox", "--disable-setuid-sandbox"],
-        });
+        const wsEndpoint = (process.env.PDF_BROWSER_WS_ENDPOINT ?? "").trim();
+        const useRemoteBrowser = wsEndpoint.length > 0;
+        const isVercel = process.env.VERCEL === "1" || !!process.env.AWS_EXECUTION_ENV;
+
+        let browser: any = null;
+        if (useRemoteBrowser) {
+            browser = await puppeteerCore.connect({ browserWSEndpoint: wsEndpoint });
+        } else if (isVercel) {
+            browser = await puppeteerCore.launch({
+                args: chromium.args,
+                defaultViewport: chromium.defaultViewport,
+                executablePath: await chromium.executablePath(),
+                headless: chromium.headless,
+            });
+        } else {
+            // Local fallback (Dev)
+            browser = await puppeteerCore.launch({
+                headless: true,
+                args: ["--no-sandbox"],
+            });
+        }
 
         const page = await browser.newPage();
         await page.setViewport({ width: 1200, height: 900 });
@@ -48,7 +66,11 @@ export async function GET(
             margin: { top: "16mm", bottom: "16mm", left: "12mm", right: "12mm" },
         });
 
-        await browser.close();
+        if (useRemoteBrowser) {
+            (browser as any).disconnect();
+        } else {
+            await (browser as any).close().catch(() => null);
+        }
 
         const orgLabel = payload.anonymized ? "Executive_Pack" : `Executive_Pack_${id}`;
 
