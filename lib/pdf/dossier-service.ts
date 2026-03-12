@@ -443,21 +443,23 @@ async function updatePdfMeta(reportId: string, updater: (current: DossierPdfMeta
 async function renderPdfBuffer(html: string): Promise<Buffer> {
     const wsEndpoint = (process.env.PDF_BROWSER_WS_ENDPOINT ?? "").trim();
     const useRemoteBrowser = wsEndpoint.length > 0;
-    const isVercel = process.env.VERCEL === "1" || !!process.env.AWS_EXECUTION_ENV;
+    const isVercel = process.env.VERCEL === "1" || !!process.env.AWS_EXECUTION_ENV || !!process.env.NOW_REGION;
 
     let browser: any = null;
     try {
         if (useRemoteBrowser) {
+            logger.info("[PDF] Using remote browser", { endpoint: wsEndpoint });
             browser = await puppeteerCore.connect({ browserWSEndpoint: wsEndpoint });
         } else if (isVercel) {
+            logger.info("[PDF] Using serverless chromium (Vercel/AWS)");
             browser = await puppeteerCore.launch({
-                args: chromium.args,
+                args: [...chromium.args, "--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage"],
                 defaultViewport: chromium.defaultViewport,
                 executablePath: await chromium.executablePath(),
-                headless: chromium.headless,
+                headless: chromium.headless === "shell" ? "shell" : true,
             });
         } else {
-            // Local fallback (Dev)
+            logger.info("[PDF] Using local puppeteer-core");
             browser = await puppeteerCore.launch({
                 headless: true,
                 args: ["--no-sandbox"],

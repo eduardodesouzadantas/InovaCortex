@@ -33,17 +33,17 @@ export async function GET(
 
         const wsEndpoint = (process.env.PDF_BROWSER_WS_ENDPOINT ?? "").trim();
         const useRemoteBrowser = wsEndpoint.length > 0;
-        const isVercel = process.env.VERCEL === "1" || !!process.env.AWS_EXECUTION_ENV;
+        const isVercel = process.env.VERCEL === "1" || !!process.env.AWS_EXECUTION_ENV || !!process.env.NOW_REGION;
 
         let browser: any = null;
         if (useRemoteBrowser) {
             browser = await puppeteerCore.connect({ browserWSEndpoint: wsEndpoint });
         } else if (isVercel) {
             browser = await puppeteerCore.launch({
-                args: chromium.args,
+                args: [...chromium.args, "--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage"],
                 defaultViewport: chromium.defaultViewport,
                 executablePath: await chromium.executablePath(),
-                headless: chromium.headless,
+                headless: chromium.headless === "shell" ? "shell" : true,
             });
         } else {
             // Local fallback (Dev)
