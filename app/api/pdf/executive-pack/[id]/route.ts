@@ -39,11 +39,12 @@ export async function GET(
         if (useRemoteBrowser) {
             browser = await puppeteerCore.connect({ browserWSEndpoint: wsEndpoint });
         } else if (isVercel) {
+            const executablePath = await chromium.executablePath();
             browser = await puppeteerCore.launch({
-                args: [...chromium.args, "--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage"],
+                args: [...chromium.args, "--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage", "--disable-gpu", "--font-render-hinting=none", "--single-process"],
                 defaultViewport: chromium.defaultViewport,
-                executablePath: await chromium.executablePath(),
-                headless: chromium.headless === "shell" ? "shell" : true,
+                executablePath,
+                headless: chromium.headless,
             });
         } else {
             // Local fallback (Dev)
