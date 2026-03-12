@@ -452,11 +452,12 @@ async function renderPdfBuffer(html: string): Promise<Buffer> {
             browser = await puppeteerCore.connect({ browserWSEndpoint: wsEndpoint });
         } else if (isVercel) {
             logger.info("[PDF] Using serverless chromium (Vercel/AWS)");
+            const executablePath = await chromium.executablePath();
             browser = await puppeteerCore.launch({
-                args: [...chromium.args, "--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage"],
+                args: [...chromium.args, "--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage", "--disable-gpu", "--font-render-hinting=none", "--single-process"],
                 defaultViewport: chromium.defaultViewport,
-                executablePath: await chromium.executablePath(),
-                headless: chromium.headless === "shell" ? "shell" : true,
+                executablePath,
+                headless: chromium.headless,
             });
         } else {
             logger.info("[PDF] Using local puppeteer-core");
@@ -476,7 +477,12 @@ async function renderPdfBuffer(html: string): Promise<Buffer> {
 
         return Buffer.from(pdf);
     } catch (error) {
-        throw new Error(`PDF render failed: ${normalizeErrorMessage(error)}`);
+        const errorMessage = normalizeErrorMessage(error);
+        if (shouldUseTextPdfFallback(errorMessage)) {
+            logger.warn("[PDF] Browser launch failed. Falling back to text PDF", { error: errorMessage });
+            return buildTextFallbackPdfBuffer(html, errorMessage);
+        }
+        throw new Error(`PDF render failed: ${errorMessage}`);
     } finally {
         if (browser) {
             if (useRemoteBrowser) {
@@ -486,6 +492,102 @@ async function renderPdfBuffer(html: string): Promise<Buffer> {
             }
         }
     }
+}
+
+function shouldUseTextPdfFallback(errorMessage: string): boolean {
+    const normalized = errorMessage.toLowerCase();
+    return [
+        "failed to launch the browser process",
+        "error while loading shared libraries",
+        "libnss3.so",
+        "could not find chrome",
+        "spawn enoent",
+        "browser was not found",
+        "failed to connect to the browser",
+    ].some((pattern) => normalized.includes(pattern));
+}
+
+function buildTextFallbackPdfBuffer(html: string, browserError: string): Buffer {
+    const extractedText = extractTextFromHtml(html);
+    const header = [
+        "InovaCortex Dossier",
+        `Generated at: ${new Date().toISOString()}`,
+        "Rendering mode: text fallback",
+        "",
+    ];
+    const details = extractedText.length > 0 ? extractedText : ["Unable to parse dossier HTML content."];
+    const footer = [
+        "",
+        "Browser rendering failed in runtime:",
+        browserError.slice(0, 240),
+    ];
+    return buildMinimalPdfFromLines([...header, ...details, ...footer]);
+}
+
+function extractTextFromHtml(html: string): string[] {
+    const plain = html
+        .replace(/<style[\s\S]*?<\/style>/gi, " ")
+        .replace(/<script[\s\S]*?<\/script>/gi, " ")
+        .replace(/<\/(p|div|h1|h2|h3|li|br|tr)>/gi, "\n")
+        .replace(/<[^>]+>/g, " ")
+        .replace(/&nbsp;/gi, " ")
+        .replace(/&amp;/gi, "&")
+        .replace(/&lt;/gi, "<")
+        .replace(/&gt;/gi, ">")
+        .replace(/&quot;/gi, "\"")
+        .replace(/&#39;/gi, "'")
+        .split("\n")
+        .map((line) => line.replace(/\s+/g, " ").trim())
+        .filter(Boolean);
+
+    return plain.slice(0, 44);
+}
+
+function buildMinimalPdfFromLines(lines: string[]): Buffer {
+    const textLines = lines.slice(0, 46);
+    const contentChunks: string[] = ["BT", "/F1 11 Tf", "50 792 Td"];
+    for (let index = 0; index < textLines.length; index += 1) {
+        if (index > 0) {
+            contentChunks.push("0 -15 Td");
+        }
+        contentChunks.push(`(${escapePdfText(textLines[index])}) Tj`);
+    }
+    contentChunks.push("ET");
+    const streamContent = contentChunks.join("\n");
+
+    const objects = [
+        "<< /Type /Catalog /Pages 2 0 R >>",
+        "<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+        "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Resources << /Font << /F1 5 0 R >> >> /Contents 4 0 R >>",
+        `<< /Length ${Buffer.byteLength(streamContent, "utf8")} >>\nstream\n${streamContent}\nendstream`,
+        "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
+    ];
+
+    let pdf = "%PDF-1.4\n";
+    const offsets: number[] = [];
+    for (let i = 0; i < objects.length; i += 1) {
+        offsets.push(Buffer.byteLength(pdf, "utf8"));
+        pdf += `${i + 1} 0 obj\n${objects[i]}\nendobj\n`;
+    }
+
+    const xrefOffset = Buffer.byteLength(pdf, "utf8");
+    pdf += `xref\n0 ${objects.length + 1}\n`;
+    pdf += "0000000000 65535 f \n";
+    for (const offset of offsets) {
+        pdf += `${String(offset).padStart(10, "0")} 00000 n \n`;
+    }
+    pdf += `trailer\n<< /Size ${objects.length + 1} /Root 1 0 R >>\nstartxref\n${xrefOffset}\n%%EOF`;
+
+    return Buffer.from(pdf, "utf8");
+}
+
+function escapePdfText(value: string): string {
+    return value
+        .replace(/\\/g, "\\\\")
+        .replace(/\(/g, "\\(")
+        .replace(/\)/g, "\\)")
+        .replace(/\r/g, "")
+        .replace(/\n/g, " ");
 }
 
 function buildDossierHtml(input: {
