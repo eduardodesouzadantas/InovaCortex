@@ -1,77 +1,84 @@
-import { PrismaClient } from "@prisma/client";
+﻿import { PrismaClient } from "@prisma/client";
 import bcrypt from "bcryptjs";
 
 const prisma = new PrismaClient();
 
 async function main() {
-    console.log("🚀 Starting initial seed...");
+    const agencyOrgSlug = (process.env.AGENCY_ORG_SLUG ?? "inovacortex").trim().toLowerCase();
 
-    // 1. Create Default Organization
-    const defaultOrgId = "default-org-id";
+    const adminEmail = (
+        process.env.ADMIN_EMAIL ??
+        process.env.INITIAL_ADMIN_EMAIL ??
+        "eduardo@inovacortex.com"
+    ).trim().toLowerCase();
+
+    const adminPassword = (
+        process.env.ADMIN_PASSWORD ??
+        process.env.INITIAL_ADMIN_PASSWORD ??
+        "M@ncha07"
+    ).trim();
+
+    if (!adminEmail || !adminPassword) {
+        throw new Error("ADMIN_EMAIL/ADMIN_PASSWORD (or INITIAL_ADMIN_*) must be set for seeding.");
+    }
+
     const organization = await prisma.organization.upsert({
-        where: { id: defaultOrgId },
+        where: { slug: agencyOrgSlug },
         update: {},
         create: {
-            id: defaultOrgId,
             name: "InovaCortex",
-            slug: "inovacortex",
+            slug: agencyOrgSlug,
             plan: "enterprise",
             industry: "Technology",
             maxAssessmentsPerMonth: 1000,
             maxUsers: 100,
         },
+        select: { id: true, slug: true },
     });
-    console.log(`✅ Organization created/verified: ${organization.slug}`);
 
-    // 2. Create Initial Admin User
-    const adminEmail = process.env.INITIAL_ADMIN_EMAIL || "admin@inovacortex.com";
-    const adminPassword = process.env.INITIAL_ADMIN_PASSWORD || "admin123";
-    const hashedPassword = await bcrypt.hash(adminPassword, 10);
+    const passwordHash = await bcrypt.hash(adminPassword, 12);
 
     const admin = await prisma.user.upsert({
         where: { email: adminEmail },
-        update: {},
+        update: {
+            role: "owner",
+            organizationId: organization.id,
+            passwordHash,
+        },
         create: {
             email: adminEmail,
-            passwordHash: hashedPassword,
-            role: "admin",
+            passwordHash,
+            role: "owner",
+            organizationId: organization.id,
+        },
+        select: { id: true, email: true, role: true },
+    });
+
+    await prisma.systemSetting.upsert({
+        where: {
+            key_organizationId: {
+                key: "system_status",
+                organizationId: organization.id,
+            },
+        },
+        update: { value: "active" },
+        create: {
+            key: "system_status",
+            value: "active",
             organizationId: organization.id,
         },
     });
-    console.log(`✅ Admin user created/verified: ${admin.email}`);
 
-    // 3. Initial System Settings
-    const settings = [
-        { key: "system_status", value: "active" },
-        { key: "ai_model_default", value: "gpt-4o" },
-        { key: "learning_mode", value: "enabled" },
-    ];
-
-    for (const setting of settings) {
-        await prisma.systemSetting.upsert({
-            where: {
-                key_organizationId: {
-                    key: setting.key,
-                    organizationId: organization.id,
-                },
-            },
-            update: {},
-            create: {
-                key: setting.key,
-                value: setting.value,
-                organizationId: organization.id,
-            },
-        });
-    }
-    console.log("✅ Basic system settings initialized.");
-
-    console.log("✨ Seed completed successfully.");
+    console.log("Seed completed", {
+        orgSlug: organization.slug,
+        adminEmail: admin.email,
+        role: admin.role,
+    });
 }
 
 main()
-    .catch((e) => {
-        console.error("❌ Seed failed:");
-        console.error(e);
+    .catch((error) => {
+        console.error("Seed failed", error);
         process.exit(1);
     })
     .finally(async () => {
