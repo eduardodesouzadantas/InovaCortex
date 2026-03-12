@@ -3,6 +3,7 @@ import chromium from "@sparticuz/chromium";
 import { prisma } from "@/lib/prisma";
 import { calculateROI } from "@/lib/roi-engine";
 import { storeDossierPdf } from "@/lib/pdf/storage";
+import { generateBusinessMRIReport } from "@/lib/report-engine/generate-report";
 import { trackUsage } from "@/lib/usage";
 import { logger } from "@/lib/logger";
 import { getBaseUrl } from "@/lib/runtime/base-url";
@@ -279,21 +280,37 @@ export async function generateAndStoreDossierPdf(payload: {
         });
 
         const blueprint = asRecord(reportContent.blueprint);
-        const html = buildDossierHtml({
-            company: report.assessment.company,
-            createdAt: report.assessment.createdAt.toLocaleDateString("pt-BR"),
-            slug: report.publicSlug,
-            scoreTotal: report.assessment.scoreTotal,
+        const recommendedMissions = parseJsonArray(report.assessment.recommendedMissions);
+        const pains = parseJsonArray(report.assessment.pains);
+        const risks = Array.isArray(reportContent.risks) ? reportContent.risks.map((item) => String(item)) : [];
+        const modules = Array.isArray(blueprint.modules) ? blueprint.modules.map((item) => String(item)) : [];
+        const integrations = Array.isArray(blueprint.integrations) ? blueprint.integrations.map((item) => String(item)) : [];
+        const roadmap = normalizeRoadmapItems(Array.isArray(reportContent.roadmap) ? reportContent.roadmap : []);
+        const summary = buildExecutiveSummary(
+            report.assessment.company,
+            report.assessment.classification,
+            report.assessment.scoreTotal,
+            recommendedMissions
+        );
+
+        const pdfBuffer = await generateBusinessMRIReport({
+            tenantId: report.assessment.organizationId,
+            reportId: report.id,
+            companyName: report.assessment.company,
+            generatedAt: new Date(),
             classification: report.assessment.classification,
-            recommendedMissions: parseJsonArray(report.assessment.recommendedMissions),
-            roadmap: Array.isArray(reportContent.roadmap) ? reportContent.roadmap : [],
-            risks: Array.isArray(reportContent.risks) ? reportContent.risks : [],
-            modules: Array.isArray(blueprint.modules) ? blueprint.modules.map((item) => String(item)) : [],
-            integrations: Array.isArray(blueprint.integrations) ? blueprint.integrations.map((item) => String(item)) : [],
+            scoreTotal: report.assessment.scoreTotal,
+            summary,
+            recommendedMissions,
+            pains,
+            risks,
+            roadmap,
+            blueprint: {
+                modules,
+                integrations,
+            },
             roi,
         });
-
-        const pdfBuffer = await renderPdfBuffer(html);
         const filename = `inovacortex-dossie-${safeFragment(report.assessment.company)}.pdf`;
 
         const storage = await storeDossierPdf({
@@ -304,6 +321,9 @@ export async function generateAndStoreDossierPdf(payload: {
         });
 
         const publicUrl = resolvePdfUrl(report.publicSlug, storage.url, storage.inlineBase64);
+        if (!publicUrl) {
+            throw new Error("PDF URL resolution failed.");
+        }
         const generatedAtIso = new Date().toISOString();
 
         await updatePdfMeta(report.id, (current) => ({
@@ -742,6 +762,38 @@ function parseJsonArray(raw: string): string[] {
     } catch {
         return [];
     }
+}
+
+function normalizeRoadmapItems(
+    rawRoadmap: unknown[]
+): Array<{ phase: string; title: string; description: string; owner?: string; eta?: string }> {
+    const rows = rawRoadmap
+        .map((item) => asRecord(item))
+        .map((item) => {
+            const phase = asOptionalString(item.phase) ?? "Fase";
+            const title = asOptionalString(item.title) ?? "Iniciativa";
+            const description = asOptionalString(item.description) ?? "Descricao nao informada";
+            const owner = asOptionalString(item.owner);
+            const eta = asOptionalString(item.eta);
+            return { phase, title, description, owner, eta };
+        })
+        .slice(0, 10);
+
+    return rows;
+}
+
+function buildExecutiveSummary(
+    company: string,
+    classification: string,
+    scoreTotal: number,
+    recommendedMissions: string[]
+): string {
+    const topMission = recommendedMissions[0] ?? "Automacao de processo critico";
+    return [
+        `A analise da ${company} indica potencial ${classification.toLowerCase()} com score ${Math.round(scoreTotal)}/100.`,
+        "O cenario atual apresenta ganhos relevantes em produtividade, previsibilidade e conversao ao estruturar automacoes em trilhas de execucao curtas.",
+        `A frente de maior impacto imediato e: ${topMission}.`,
+    ].join(" ");
 }
 
 function toPublicUrl(url: string): string {
