@@ -1,5 +1,5 @@
 import chromium from "@sparticuz/chromium";
-import puppeteerCore, { type Browser } from "puppeteer-core";
+import puppeteerCore from "puppeteer-core";
 
 export interface GeneratePdfInput {
     html: string;
@@ -8,18 +8,33 @@ export interface GeneratePdfInput {
 }
 
 export async function generatePdfFromHtml(input: GeneratePdfInput): Promise<Buffer> {
-    let browser: Browser | null = null;
-    let remote = false;
+    await preloadFonts();
+    const executablePath = await resolveExecutablePath();
+
+    const browser = await puppeteerCore.launch({
+        args: [
+            ...chromium.args,
+            "--no-sandbox",
+            "--disable-setuid-sandbox",
+            "--disable-dev-shm-usage",
+            "--font-render-hinting=none",
+        ],
+        executablePath,
+        headless: chromium.headless,
+        defaultViewport: chromium.defaultViewport ?? {
+            width: 1280,
+            height: 1810,
+            deviceScaleFactor: 2,
+        },
+    });
 
     try {
-        const launched = await launchBrowser();
-        browser = launched.browser;
-        remote = launched.remote;
-
         const page = await browser.newPage();
-        await page.setViewport({ width: 1280, height: 1810, deviceScaleFactor: 2 });
         await page.emulateMediaType("screen");
         await page.setContent(input.html, { waitUntil: ["domcontentloaded", "networkidle0"] });
+
+        // Ensure web fonts are fully loaded before rendering.
+        await page.evaluateHandle("document.fonts.ready");
         await page.waitForFunction("window.__REPORT_READY === true", { timeout: 15000 }).catch(() => null);
 
         const pdf = await page.pdf({
@@ -37,63 +52,27 @@ export async function generatePdfFromHtml(input: GeneratePdfInput): Promise<Buff
         });
 
         return Buffer.from(pdf);
-    } catch (error) {
-        const message = normalizeError(error);
-        if (shouldUseTextPdfFallback(message)) {
-            return buildTextFallbackPdfBuffer(input, message);
-        }
-        throw new Error(`Business MRI PDF generation failed: ${message}`);
     } finally {
-        if (browser) {
-            if (remote) {
-                browser.disconnect();
-            } else {
-                await browser.close().catch(() => null);
-            }
-        }
+        await browser.close().catch(() => null);
     }
 }
 
-async function launchBrowser(): Promise<{ browser: Browser; remote: boolean }> {
-    const wsEndpoint = (process.env.PDF_BROWSER_WS_ENDPOINT ?? "").trim();
-    if (wsEndpoint) {
-        const browser = await puppeteerCore.connect({ browserWSEndpoint: wsEndpoint });
-        return { browser, remote: true };
+async function resolveExecutablePath(): Promise<string> {
+    const configured =
+        (process.env.PUPPETEER_EXECUTABLE_PATH ?? process.env.CHROMIUM_EXECUTABLE_PATH ?? "").trim();
+
+    if (configured.length > 0) {
+        return configured;
     }
 
-    const launchErrors: string[] = [];
+    return chromium.executablePath();
+}
 
-    try {
-        const executablePath = await chromium.executablePath();
-        const browser = await puppeteerCore.launch({
-            executablePath,
-            args: [
-                ...chromium.args,
-                "--no-sandbox",
-                "--disable-setuid-sandbox",
-                "--disable-dev-shm-usage",
-                "--disable-gpu",
-                "--font-render-hinting=none",
-            ],
-            defaultViewport: chromium.defaultViewport,
-            headless: chromium.headless,
-        });
-        return { browser, remote: false };
-    } catch (error) {
-        launchErrors.push(normalizeError(error));
-    }
+async function preloadFonts(): Promise<void> {
+    const customFont = (process.env.PDF_FONT_REGULAR_URL ?? "").trim();
+    if (!customFont) return;
 
-    try {
-        const browser = await puppeteerCore.launch({
-            headless: true,
-            args: ["--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage"],
-        });
-        return { browser, remote: false };
-    } catch (error) {
-        launchErrors.push(normalizeError(error));
-    }
-
-    throw new Error(`Unable to launch browser for PDF generation. Attempts: ${launchErrors.join(" | ")}`);
+    await chromium.font(customFont).catch(() => null);
 }
 
 function buildHeaderTemplate(companyName: string): string {
@@ -123,133 +102,4 @@ function escapeHtml(value: string): string {
         .replace(/>/g, "&gt;")
         .replace(/"/g, "&quot;")
         .replace(/'/g, "&#39;");
-}
-
-function normalizeError(error: unknown): string {
-    return error instanceof Error ? error.message : String(error);
-}
-
-function shouldUseTextPdfFallback(errorMessage: string): boolean {
-    const normalized = errorMessage.toLowerCase();
-    return [
-        "failed to launch the browser process",
-        "error while loading shared libraries",
-        "libnss3.so",
-        "could not find chrome",
-        "spawn enoent",
-        "browser was not found",
-        "failed to connect to the browser",
-        "an `executablepath` or `channel` must be specified",
-        "unable to launch browser for pdf generation",
-    ].some((pattern) => normalized.includes(pattern));
-}
-
-function buildTextFallbackPdfBuffer(input: GeneratePdfInput, browserError: string): Buffer {
-    const extractedText = extractTextFromHtml(input.html);
-    const header = [
-        "InovaCortex AI Business MRI",
-        `Empresa: ${input.companyName}`,
-        `Report ID: ${input.reportId}`,
-        `Generated at: ${new Date().toISOString()}`,
-        "Rendering mode: text fallback",
-        "",
-    ];
-    const details = extractedText.length > 0 ? extractedText : ["Unable to parse report HTML content."];
-    const footer = [
-        "",
-        "Browser rendering failed in runtime:",
-        browserError.slice(0, 240),
-    ];
-
-    return buildMinimalPdfFromLines([...header, ...details, ...footer]);
-}
-
-function extractTextFromHtml(html: string): string[] {
-    const plain = html
-        .replace(/<style[\s\S]*?<\/style>/gi, " ")
-        .replace(/<script[\s\S]*?<\/script>/gi, " ")
-        .replace(/<\/(p|div|h1|h2|h3|li|br|tr|td|th|section|article)>/gi, "\n")
-        .replace(/<[^>]+>/g, " ")
-        .replace(/&nbsp;/gi, " ")
-        .replace(/&amp;/gi, "&")
-        .replace(/&lt;/gi, "<")
-        .replace(/&gt;/gi, ">")
-        .replace(/&quot;/gi, "\"")
-        .replace(/&#39;/gi, "'")
-        .split("\n")
-        .map((line) => line.replace(/\s+/g, " ").trim())
-        .filter(Boolean);
-
-    return plain.slice(0, 90);
-}
-
-function buildMinimalPdfFromLines(lines: string[]): Buffer {
-    const textLines = lines.slice(0, 120);
-    const pageSize = 42;
-    const pages = Math.max(1, Math.ceil(textLines.length / pageSize));
-
-    const objects: string[] = [];
-    objects.push("<< /Type /Catalog /Pages 2 0 R >>");
-
-    const kidsRefs: string[] = [];
-    const pageObjectNumbers: number[] = [];
-    const contentObjectNumbers: number[] = [];
-    const fontObjectNumber = 3 + pages * 2;
-
-    for (let pageIndex = 0; pageIndex < pages; pageIndex += 1) {
-        const pageObjectNumber = 3 + pageIndex;
-        const contentObjectNumber = 3 + pages + pageIndex;
-        pageObjectNumbers.push(pageObjectNumber);
-        contentObjectNumbers.push(contentObjectNumber);
-        kidsRefs.push(`${pageObjectNumber} 0 R`);
-    }
-
-    objects.push(`<< /Type /Pages /Kids [${kidsRefs.join(" ")}] /Count ${pages} >>`);
-
-    for (let pageIndex = 0; pageIndex < pages; pageIndex += 1) {
-        const pageObjectNumber = pageObjectNumbers[pageIndex];
-        const contentObjectNumber = contentObjectNumbers[pageIndex];
-        objects[pageObjectNumber - 1] = `<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Resources << /Font << /F1 ${fontObjectNumber} 0 R >> >> /Contents ${contentObjectNumber} 0 R >>`;
-    }
-
-    for (let pageIndex = 0; pageIndex < pages; pageIndex += 1) {
-        const chunk = textLines.slice(pageIndex * pageSize, (pageIndex + 1) * pageSize);
-        const contentChunks: string[] = ["BT", "/F1 10 Tf", "44 792 Td"];
-        for (let index = 0; index < chunk.length; index += 1) {
-            if (index > 0) contentChunks.push("0 -16 Td");
-            contentChunks.push(`(${escapePdfText(chunk[index])}) Tj`);
-        }
-        contentChunks.push("ET");
-        const streamContent = contentChunks.join("\n");
-        const contentObjectNumber = contentObjectNumbers[pageIndex];
-        objects[contentObjectNumber - 1] = `<< /Length ${Buffer.byteLength(streamContent, "utf8")} >>\nstream\n${streamContent}\nendstream`;
-    }
-
-    objects[fontObjectNumber - 1] = "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>";
-
-    let pdf = "%PDF-1.4\n";
-    const offsets: number[] = [];
-    for (let i = 0; i < objects.length; i += 1) {
-        offsets.push(Buffer.byteLength(pdf, "utf8"));
-        pdf += `${i + 1} 0 obj\n${objects[i]}\nendobj\n`;
-    }
-
-    const xrefOffset = Buffer.byteLength(pdf, "utf8");
-    pdf += `xref\n0 ${objects.length + 1}\n`;
-    pdf += "0000000000 65535 f \n";
-    for (const offset of offsets) {
-        pdf += `${String(offset).padStart(10, "0")} 00000 n \n`;
-    }
-    pdf += `trailer\n<< /Size ${objects.length + 1} /Root 1 0 R >>\nstartxref\n${xrefOffset}\n%%EOF`;
-
-    return Buffer.from(pdf, "utf8");
-}
-
-function escapePdfText(value: string): string {
-    return value
-        .replace(/\\/g, "\\\\")
-        .replace(/\(/g, "\\(")
-        .replace(/\)/g, "\\)")
-        .replace(/\r/g, "")
-        .replace(/\n/g, " ");
 }
