@@ -155,7 +155,7 @@ export async function loginWithPassword(
                 role: user.role,
                 endpoint: options.endpoint,
             });
-            return NextResponse.json({ error: "Internal Server Error" }, { status: 500 });
+            return NextResponse.json({ error: "ERRO_ROLE_INVALIDA: " + user.role }, { status: 500 });
         }
 
         const validPassword = await verifyPassword(password, user.passwordHash);
@@ -200,6 +200,6 @@ export async function loginWithPassword(
         });
     } catch (error) {
         logger.error("Login error", { error: String(error), endpoint: options.endpoint });
-        return NextResponse.json({ error: "Internal Server Error" }, { status: 500 });
+        return NextResponse.json({ error: "ERRO_REAL_DO_SISTEMA: " + String(error) }, { status: 500 });
     }
 }
