@@ -1,7 +1,8 @@
 "use client";
 
-import { Copy, ExternalLink, Check, Download } from "lucide-react";
+import { Copy, ExternalLink, Check } from "lucide-react";
 import { useState } from "react";
+import { PdfDownloadButton } from "@/components/pdf-download-button";
 
 export function AdminActions({
     slug,
@@ -38,15 +39,12 @@ export function AdminActions({
                 {copied ? <Check className="w-3.5 h-3.5 mr-1.5 text-green-500" /> : <Copy className="w-3.5 h-3.5 mr-1.5" />}
                 {copied ? "Copiado!" : "WhatsApp"}
             </button>
-            <a
-                href={`/api/pdf/${slug}`}
-                download
-                className="inline-flex items-center text-xs font-medium bg-background/50 border border-border hover:bg-muted px-2.5 py-1.5 rounded transition-colors"
-                title="Transcrever para PDF"
-            >
-                <Download className="w-3.5 h-3.5 mr-1.5" />
-                PDF
-            </a>
+            <PdfDownloadButton
+                slug={slug}
+                className="inline-flex items-center text-xs font-medium bg-background/50 border border-border hover:bg-muted px-2.5 py-1.5 rounded transition-colors disabled:opacity-60"
+                label="PDF"
+                title="Gerar e baixar PDF sem sair da pagina"
+            />
             <a
                 href={`/diagnostico/${slug}`}
                 target="_blank"

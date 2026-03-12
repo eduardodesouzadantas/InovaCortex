@@ -54,8 +54,10 @@ export async function POST(
             { status: 200 }
         );
     } catch (error) {
+        const rawMessage = error instanceof Error ? error.message : String(error);
+        const message = normalizePdfErrorMessage(rawMessage);
         return NextResponse.json(
-            { error: String(error), status: "failed" }, 
+            { error: message, status: "failed" }, 
             { status: 500 }
         );
     }
@@ -242,5 +244,17 @@ function sanitizeFilename(value: string): string {
             .replace(/[^a-z0-9\-_.]/g, "")
             .slice(0, 120) || "dossie"
     );
+}
+
+function normalizePdfErrorMessage(raw: string): string {
+    const normalized = raw.toLowerCase();
+    if (
+        normalized.includes("failed to launch the browser process") ||
+        normalized.includes("error while loading shared libraries") ||
+        normalized.includes("libnss3.so")
+    ) {
+        return "Ambiente de renderizacao indisponivel no momento. Tente novamente em instantes.";
+    }
+    return raw;
 }
 

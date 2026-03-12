@@ -5,7 +5,6 @@ import Link from "next/link";
 import {
     ChevronLeft,
     FileText,
-    Download,
     Building2,
     User,
     Phone,
@@ -20,6 +19,7 @@ import { ROISimulator } from "@/app/admin/[id]/roi-simulator";
 import { ProposalPanel } from "@/app/admin/[id]/proposal-panel";
 import { BillingPanel } from "@/app/admin/[id]/billing-panel";
 import { AssignmentPanel } from "@/app/admin/[id]/assignment-panel";
+import { PdfDownloadButton } from "@/components/pdf-download-button";
 
 export const runtime = "nodejs";
 
@@ -164,10 +164,12 @@ export default async function AgencyLeadCockpitPage({ params }: { params: Promis
                                         <FileText className="mr-2 h-4 w-4" />
                                         Visualizar dossie publico
                                     </a>
-                                    <a href={`/api/pdf/${lead.artifactReport.publicSlug}`} download className="btn-secondary">
-                                        <Download className="mr-2 h-4 w-4" />
-                                        Download PDF completo
-                                    </a>
+                                    <PdfDownloadButton
+                                        slug={lead.artifactReport.publicSlug}
+                                        className="btn-secondary disabled:opacity-60"
+                                        label="Download PDF completo"
+                                        title="Gerar e baixar PDF sem sair da pagina"
+                                    />
                                 </div>
                             ) : (
                                 <p className="text-sm italic text-muted-foreground">Artefatos ainda nao gerados para esta avaliacao.</p>

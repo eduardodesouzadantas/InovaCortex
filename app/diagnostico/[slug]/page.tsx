@@ -1,10 +1,11 @@
 import { prisma } from "@/lib/prisma";
 import { notFound } from "next/navigation";
 import { FadeIn } from "@/components/fade-in";
-import { BrainCircuit, CheckCircle2, AlertTriangle, ListChecks, ShieldCheck, Download, Calendar } from "lucide-react";
+import { BrainCircuit, CheckCircle2, AlertTriangle, ListChecks, ShieldCheck, Calendar } from "lucide-react";
 import Link from "next/link";
 import { ROIImpactCard } from "@/components/roi-impact-card";
 import { calculateROI } from "@/lib/roi-engine";
+import { PdfDownloadButton } from "@/components/pdf-download-button";
 
 export const runtime = "nodejs";
 
@@ -17,10 +18,12 @@ export default async function DiagnosticoPublicoPage({
     searchParams: Promise<{ pdf?: string }>;
 }) {
     const resolvedSearchParams = await searchParams;
+    const resolvedParams = await params;
+    const slug = resolvedParams.slug;
 
     // 1. Fetch data
     const report = await prisma.artifactReport.findUnique({
-        where: { publicSlug: (await params).slug },
+        where: { publicSlug: slug },
         include: { assessment: true }
     });
 
@@ -76,7 +79,7 @@ export default async function DiagnosticoPublicoPage({
                         </p>
                         <div className="flex items-center gap-4 mt-8 text-sm text-muted-foreground">
                             <span className="flex items-center gap-1"><Calendar className="w-4 h-4" /> Gerado em: {assessment.createdAt.toLocaleDateString('pt-BR')}</span>
-                            <span className="flex items-center gap-1"><ShieldCheck className="w-4 h-4" /> Hash: {(await params).slug.substring(0, 8)}</span>
+                            <span className="flex items-center gap-1"><ShieldCheck className="w-4 h-4" /> Hash: {slug.substring(0, 8)}</span>
                         </div>
                     </FadeIn>
                 </div>
@@ -218,13 +221,12 @@ export default async function DiagnosticoPublicoPage({
                             Dossiê Gerado Oficialmente pela <strong>InovaCortex</strong>
                         </p>
                         <div className="flex w-full md:w-auto gap-3">
-                            <a
-                                href={`/api/pdf/${(await params).slug}`}
-                                className="flex-1 md:flex-none inline-flex h-11 items-center justify-center rounded-md border border-input bg-background px-6 text-sm font-medium shadow-sm transition-colors hover:bg-accent hover:text-accent-foreground"
-                            >
-                                <Download className="w-4 h-4 mr-2" />
-                                Baixar PDF
-                            </a>
+                            <PdfDownloadButton
+                                slug={slug}
+                                className="flex-1 md:flex-none inline-flex h-11 items-center justify-center rounded-md border border-input bg-background px-6 text-sm font-medium shadow-sm transition-colors hover:bg-accent hover:text-accent-foreground disabled:opacity-60"
+                                label="Baixar PDF"
+                                title="Gerar e baixar PDF sem sair da pagina"
+                            />
                             <a
                                 href={`https://wa.me/5511967011133?text=${msgWhatsApp}`}
                                 target="_blank"

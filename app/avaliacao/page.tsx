@@ -13,6 +13,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Checkbox } from "@/components/ui/checkbox";
+import { PdfDownloadButton } from "@/components/pdf-download-button";
 
 const STEPS = ["Dados Pessoais", "Perfil e Aquisição", "Operações e Stack", "Dores e Metas", "Finalizar"];
 
@@ -169,13 +170,12 @@ export default function AvaliacaoWizard() {
                                 <FileText className="w-4 h-4 mr-2" />
                                 Abrir Dossiê
                             </a>
-                            <a
-                                href={`/api/pdf/${result.dossierSlug}`}
-                                className="inline-flex h-14 items-center justify-center rounded-md border border-primary/50 bg-primary/10 text-primary px-6 text-sm font-medium shadow-sm transition-colors hover:bg-primary/20"
-                            >
-                                <Download className="w-4 h-4 mr-2" />
-                                Baixar PDF
-                            </a>
+                            <PdfDownloadButton
+                                slug={result.dossierSlug}
+                                className="inline-flex h-14 items-center justify-center rounded-md border border-primary/50 bg-primary/10 text-primary px-6 text-sm font-medium shadow-sm transition-colors hover:bg-primary/20 disabled:opacity-60"
+                                label="Baixar PDF"
+                                title="Gerar e baixar PDF sem sair da pagina"
+                            />
                             <a
                                 href={`https://wa.me/5511967011133?text=${msgWhatsApp}`}
                                 target="_blank"
