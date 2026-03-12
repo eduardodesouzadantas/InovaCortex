@@ -14,6 +14,7 @@ export interface DossierPdfMeta {
     status: DossierPdfStatus;
     url?: string;
     storageKey?: string;
+    inlineBase64?: string;
     requestedAt?: string;
     generatedAt?: string;
     error?: string;
@@ -29,6 +30,7 @@ export interface DossierPdfState {
     status: DossierPdfStatus;
     url?: string;
     storageKey?: string;
+    inlineBase64?: string;
     requestedAt?: string;
     generatedAt?: string;
     error?: string;
@@ -144,6 +146,7 @@ export async function getDossierPdfStateBySlug(slug: string): Promise<DossierPdf
         status: meta.status,
         url: meta.url,
         storageKey: meta.storageKey,
+        inlineBase64: meta.inlineBase64,
         requestedAt: meta.requestedAt,
         generatedAt: meta.generatedAt,
         error: meta.error,
@@ -168,6 +171,7 @@ export async function queueDossierPdfGenerationBySlug(slug: string): Promise<Dos
             status: "ready",
             url: meta.url,
             storageKey: meta.storageKey,
+            inlineBase64: meta.inlineBase64,
             requestedAt: meta.requestedAt,
             generatedAt: meta.generatedAt,
             queueId: meta.queueId,
@@ -305,6 +309,7 @@ export async function generateAndStoreDossierPdf(payload: {
             status: "ready",
             url: publicUrl,
             storageKey: storage.storageKey,
+            inlineBase64: storage.inlineBase64,
             generatedAt: generatedAtIso,
             error: undefined,
         }));
@@ -343,6 +348,7 @@ export async function generateAndStoreDossierPdf(payload: {
             status: "failed",
             error: message,
             generatedAt: undefined,
+            inlineBase64: undefined,
         }));
 
         throw error;
@@ -356,12 +362,13 @@ export function getPdfMetaFromContent(contentJson: string): DossierPdfMeta {
     const status = normalizeStatus(raw.status);
     const url = asOptionalString(raw.url);
     const storageKey = asOptionalString(raw.storageKey);
+    const inlineBase64 = asOptionalString(raw.inlineBase64);
     const requestedAt = asOptionalString(raw.requestedAt);
     const generatedAt = asOptionalString(raw.generatedAt);
     const error = asOptionalString(raw.error);
     const queueId = asOptionalString(raw.queueId);
 
-    return { status, url, storageKey, requestedAt, generatedAt, error, queueId };
+    return { status, url, storageKey, inlineBase64, requestedAt, generatedAt, error, queueId };
 }
 
 async function findReportBySlug(slug: string): Promise<ReportWithAssessment | null> {
@@ -426,6 +433,7 @@ async function updatePdfMeta(reportId: string, updater: (current: DossierPdfMeta
         status: next.status,
         url: next.url ?? null,
         storageKey: next.storageKey ?? null,
+        inlineBase64: next.inlineBase64 ?? null,
         requestedAt: next.requestedAt ?? null,
         generatedAt: next.generatedAt ?? null,
         error: next.error ?? null,

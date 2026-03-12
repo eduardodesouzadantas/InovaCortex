@@ -76,6 +76,27 @@ export async function GET(
         return new NextResponse("Dossie nao encontrado", { status: 404 });
     }
 
+    if (mode === "file") {
+        if (state.status !== "ready") {
+            return new NextResponse("PDF ainda nao esta pronto", { status: 409 });
+        }
+
+        if (!state.inlineBase64) {
+            return new NextResponse("Arquivo PDF nao disponivel", { status: 404 });
+        }
+
+        const pdfBuffer = Buffer.from(state.inlineBase64, "base64");
+        const filename = `${sanitizeFilename(slug)}.pdf`;
+        return new NextResponse(pdfBuffer, {
+            status: 200,
+            headers: {
+                "Content-Type": "application/pdf",
+                "Content-Disposition": `attachment; filename="${filename}"`,
+                "Cache-Control": "no-store",
+            },
+        });
+    }
+
     if (mode === "status") {
         return NextResponse.json({
             slug,
@@ -211,5 +232,15 @@ function buildPendingHtml(slug: string): string {
   </script>
 </body>
 </html>`;
+}
+
+function sanitizeFilename(value: string): string {
+    return (
+        value
+            .toLowerCase()
+            .replace(/\s+/g, "-")
+            .replace(/[^a-z0-9\-_.]/g, "")
+            .slice(0, 120) || "dossie"
+    );
 }
 

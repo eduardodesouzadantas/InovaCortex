@@ -13,6 +13,7 @@ export interface StoreDossierPdfResult {
     url: string;
     storageKey: string;
     stub: boolean;
+    inlineBase64?: string;
 }
 
 export async function storeDossierPdf(input: StoreDossierPdfInput): Promise<StoreDossierPdfResult> {
@@ -22,7 +23,8 @@ export async function storeDossierPdf(input: StoreDossierPdfInput): Promise<Stor
     }
 
     if (process.env.NODE_ENV === "production") {
-        throw new Error("PDF storage is not configured for production. Configure S3/R2 storage variables.");
+        const result = await storeInlineForApi(input);
+        return { ...result, stub: true };
     }
 
     const result = await storeLocally(input);
@@ -82,6 +84,22 @@ async function storeInS3(input: StoreDossierPdfInput): Promise<Omit<StoreDossier
     return {
         url: `${cdnBase.replace(/\/$/, "")}/${key}`,
         storageKey: key,
+    };
+}
+
+async function storeInlineForApi(input: StoreDossierPdfInput): Promise<Omit<StoreDossierPdfResult, "stub">> {
+    const safeSlug = sanitizeFilename(input.slug);
+    const safeFilename = sanitizeFilename(input.filename) || "dossie.pdf";
+
+    return {
+        url: `/api/pdf/${encodeURIComponent(safeSlug)}?mode=file`,
+        storageKey: path.posix.join(
+            "inline",
+            sanitizeFilename(input.organizationId),
+            safeSlug,
+            `${Date.now()}-${safeFilename}`
+        ),
+        inlineBase64: input.buffer.toString("base64"),
     };
 }
 
