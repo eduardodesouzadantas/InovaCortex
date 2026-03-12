@@ -1,4 +1,6 @@
 import puppeteer from "puppeteer";
+import puppeteerCore from "puppeteer-core";
+import chromium from "@sparticuz/chromium";
 import { prisma } from "@/lib/prisma";
 import { calculateROI } from "@/lib/roi-engine";
 import { storeDossierPdf } from "@/lib/pdf/storage";
@@ -442,12 +444,21 @@ async function updatePdfMeta(reportId: string, updater: (current: DossierPdfMeta
 async function renderPdfBuffer(html: string): Promise<Buffer> {
     const wsEndpoint = (process.env.PDF_BROWSER_WS_ENDPOINT ?? "").trim();
     const useRemoteBrowser = wsEndpoint.length > 0;
+    const isVercel = process.env.VERCEL === "1" || !!process.env.AWS_EXECUTION_ENV;
 
-    let browser: Awaited<ReturnType<typeof puppeteer.launch>> | Awaited<ReturnType<typeof puppeteer.connect>> | null = null;
+    let browser: any = null;
     try {
-        browser = useRemoteBrowser
-            ? await puppeteer.connect({ browserWSEndpoint: wsEndpoint })
-            : await puppeteer.launch({
+        if (useRemoteBrowser) {
+            browser = await puppeteer.connect({ browserWSEndpoint: wsEndpoint });
+        } else if (isVercel) {
+            browser = await puppeteerCore.launch({
+                args: chromium.args,
+                defaultViewport: chromium.defaultViewport,
+                executablePath: await chromium.executablePath(),
+                headless: chromium.headless,
+            });
+        } else {
+            browser = await puppeteer.launch({
                 headless: true,
                 args: [
                     "--no-sandbox",
@@ -456,6 +467,7 @@ async function renderPdfBuffer(html: string): Promise<Buffer> {
                     "--disable-gpu",
                 ],
             });
+        }
 
         const page = await browser.newPage();
         await page.setContent(html, { waitUntil: "domcontentloaded" });
@@ -471,9 +483,9 @@ async function renderPdfBuffer(html: string): Promise<Buffer> {
     } finally {
         if (browser) {
             if (useRemoteBrowser) {
-                (browser as Awaited<ReturnType<typeof puppeteer.connect>>).disconnect();
+                (browser as any).disconnect();
             } else {
-                await (browser as Awaited<ReturnType<typeof puppeteer.launch>>).close().catch(() => null);
+                await (browser as any).close().catch(() => null);
             }
         }
     }
