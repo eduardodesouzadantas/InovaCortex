@@ -137,6 +137,7 @@ export async function getDossierPdfStateBySlug(slug: string): Promise<DossierPdf
     }
 
     const meta = getPdfMetaFromContent(report.contentJson);
+    const resolvedUrl = resolvePdfUrl(report.publicSlug, meta.url, meta.inlineBase64);
     return {
         found: true,
         slug,
@@ -144,7 +145,7 @@ export async function getDossierPdfStateBySlug(slug: string): Promise<DossierPdf
         organizationId: report.assessment.organizationId,
         assessmentId: report.assessmentId,
         status: meta.status,
-        url: meta.url,
+        url: resolvedUrl,
         storageKey: meta.storageKey,
         inlineBase64: meta.inlineBase64,
         requestedAt: meta.requestedAt,
@@ -161,6 +162,7 @@ export async function queueDossierPdfGenerationBySlug(slug: string): Promise<Dos
     }
 
     const meta = getPdfMetaFromContent(report.contentJson);
+    const resolvedUrl = resolvePdfUrl(report.publicSlug, meta.url, meta.inlineBase64);
     if (meta.status === "ready" && meta.url) {
         return {
             found: true,
@@ -169,7 +171,7 @@ export async function queueDossierPdfGenerationBySlug(slug: string): Promise<Dos
             organizationId: report.assessment.organizationId,
             assessmentId: report.assessmentId,
             status: "ready",
-            url: meta.url,
+            url: resolvedUrl,
             storageKey: meta.storageKey,
             inlineBase64: meta.inlineBase64,
             requestedAt: meta.requestedAt,
@@ -301,7 +303,7 @@ export async function generateAndStoreDossierPdf(payload: {
             buffer: pdfBuffer,
         });
 
-        const publicUrl = toPublicUrl(storage.url);
+        const publicUrl = resolvePdfUrl(report.publicSlug, storage.url, storage.inlineBase64);
         const generatedAtIso = new Date().toISOString();
 
         await updatePdfMeta(report.id, (current) => ({
@@ -748,6 +750,22 @@ function toPublicUrl(url: string): string {
     }
     const baseUrl = getBaseUrl();
     return `${baseUrl}${url.startsWith("/") ? "" : "/"}${url}`;
+}
+
+function resolvePdfUrl(slug: string, url: string | undefined, inlineBase64: string | undefined): string | undefined {
+    if (!url && !inlineBase64) {
+        return undefined;
+    }
+
+    if (inlineBase64) {
+        return `/api/pdf/${encodeURIComponent(slug)}?mode=file`;
+    }
+
+    if (!url) {
+        return undefined;
+    }
+
+    return toPublicUrl(url);
 }
 
 function normalizeErrorMessage(error: unknown): string {
