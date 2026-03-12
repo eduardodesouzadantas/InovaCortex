@@ -14,7 +14,7 @@ import { Label } from "@/components/ui/label";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Checkbox } from "@/components/ui/checkbox";
 
-const STEPS = ["Dados Pessoais", "Contexto Operacional", "Stack Tecnológico", "Dores e Metas", "Finalizar"];
+const STEPS = ["Dados Pessoais", "Perfil e Aquisição", "Operações e Stack", "Dores e Metas", "Finalizar"];
 
 // Componente principal do Wizard
 export default function AvaliacaoWizard() {
@@ -27,7 +27,9 @@ export default function AvaliacaoWizard() {
         resolver: zodResolver(assessmentSchema) as any,
         defaultValues: {
             name: "", email: "", phone: "", company: "", role: "",
-            segment: "", teamSize: "", volumeDay: "", channels: [],
+            segment: "", city: "", monthlyRevenue: "", teamSize: "", customerVolume: "",
+            channels: [], monthlyLeads: "", conversionRate: "", responseTime: "",
+            manualTasks: "", hoursLost: "", crmUsage: "", automationLevel: "",
             stack: [], pains: [], urgency: "", goal: "", honeypot: "",
             whatsappConsent: false
         },
@@ -58,9 +60,9 @@ export default function AvaliacaoWizard() {
     // Avançar passo com validação parcial
     const handleNext = async () => {
         let fieldsToValidate: any[] = [];
-        if (currentStep === 0) fieldsToValidate = ["name", "email", "phone", "company", "role"];
-        if (currentStep === 1) fieldsToValidate = ["segment", "teamSize", "volumeDay", "channels"];
-        if (currentStep === 2) fieldsToValidate = ["stack"];
+        if (currentStep === 0) fieldsToValidate = ["name", "email", "phone", "company", "role", "city"];
+        if (currentStep === 1) fieldsToValidate = ["segment", "monthlyRevenue", "teamSize", "customerVolume", "channels", "monthlyLeads", "conversionRate", "responseTime"];
+        if (currentStep === 2) fieldsToValidate = ["manualTasks", "hoursLost", "crmUsage", "automationLevel", "stack"];
         if (currentStep === 3) fieldsToValidate = ["pains", "urgency", "goal"];
 
         const isStepValid = await trigger(fieldsToValidate as any);
@@ -243,6 +245,11 @@ export default function AvaliacaoWizard() {
                                     <Input id="company" {...register("company")} placeholder="Inova Corp" className="bg-background" />
                                     {errors.company && <p className="text-sm text-red-500">{errors.company.message}</p>}
                                 </div>
+                                <div className="space-y-2">
+                                    <Label htmlFor="city">Cidade / Estado</Label>
+                                    <Input id="city" {...register("city")} placeholder="São Paulo - SP" className="bg-background" />
+                                    {errors.city && <p className="text-sm text-red-500">{errors.city.message}</p>}
+                                </div>
                                 <div className="space-y-2 md:col-span-2">
                                     <Label htmlFor="role">Cargo</Label>
                                     <Input id="role" {...register("role")} placeholder="CTO, Diretor, Gerente..." className="bg-background" />
@@ -253,75 +260,204 @@ export default function AvaliacaoWizard() {
 
                         <div className={currentStep === 1 ? "block" : "hidden"}>
                             <div className="space-y-6">
-                                <div className="space-y-2">
-                                    <Label htmlFor="segment">Segmento de Atuação</Label>
-                                    <Input id="segment" {...register("segment")} placeholder="Tecnologia, Varejo, Saúde..." className="bg-background" />
-                                    {errors.segment && <p className="text-sm text-red-500">{errors.segment.message}</p>}
-                                </div>
-
-                                <div className="space-y-3">
-                                    <Label>Tamanho da Equipe</Label>
-                                    <Controller
-                                        name="teamSize"
-                                        control={control}
-                                        render={({ field }) => (
-                                            <RadioGroup onValueChange={field.onChange} defaultValue={field.value} className="flex flex-col space-y-1">
-                                                <div className="flex items-center space-x-2"><RadioGroupItem value="1-10" id="t1" /><Label htmlFor="t1">1 a 10 colaboradores</Label></div>
-                                                <div className="flex items-center space-x-2"><RadioGroupItem value="11-50" id="t2" /><Label htmlFor="t2">11 a 50 colaboradores</Label></div>
-                                                <div className="flex items-center space-x-2"><RadioGroupItem value="51-200" id="t3" /><Label htmlFor="t3">51 a 200 colaboradores</Label></div>
-                                                <div className="flex items-center space-x-2"><RadioGroupItem value="200+" id="t4" /><Label htmlFor="t4">Mais de 200</Label></div>
-                                            </RadioGroup>
-                                        )}
-                                    />
-                                    {errors.teamSize && <p className="text-sm text-red-500">{errors.teamSize.message}</p>}
-                                </div>
-
-                                <div className="space-y-3">
-                                    <Label>Volume de Atendimentos / Operações por dia</Label>
-                                    <Controller
-                                        name="volumeDay"
-                                        control={control}
-                                        render={({ field }) => (
-                                            <RadioGroup onValueChange={field.onChange} defaultValue={field.value} className="flex flex-col space-y-1">
-                                                <div className="flex items-center space-x-2"><RadioGroupItem value="Menos de 100" id="v1" /><Label htmlFor="v1">Menos de 100</Label></div>
-                                                <div className="flex items-center space-x-2"><RadioGroupItem value="100-500" id="v2" /><Label htmlFor="v2">100 a 500</Label></div>
-                                                <div className="flex items-center space-x-2"><RadioGroupItem value="501-1000" id="v3" /><Label htmlFor="v3">501 a 1000</Label></div>
-                                                <div className="flex items-center space-x-2"><RadioGroupItem value="Mais de 500" id="v4" /><Label htmlFor="v4">&gt; 1000 massivos</Label></div>
-                                            </RadioGroup>
-                                        )}
-                                    />
-                                    {errors.volumeDay && <p className="text-sm text-red-500">{errors.volumeDay.message}</p>}
-                                </div>
-
-                                <div className="space-y-3">
-                                    <Label>Canais Principais (Selecione todos que aplicam)</Label>
-                                    <div className="grid grid-cols-2 gap-2">
-                                        {["WhatsApp", "Instagram", "Email", "Telefone", "Site/App"].map((ch) => (
-                                            <div key={ch} className="flex items-center space-x-2">
-                                                <Checkbox
-                                                    id={`ch-${ch}`}
-                                                    checked={watch("channels")?.includes(ch)}
-                                                    onCheckedChange={(checked) => {
-                                                        const val = watch("channels") || [];
-                                                        form.setValue("channels", checked ? [...val, ch] : val.filter((v: any) => v !== ch), { shouldValidate: true });
-                                                    }}
-                                                />
-                                                <Label htmlFor={`ch-${ch}`}>{ch}</Label>
-                                            </div>
-                                        ))}
+                                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                                    <div className="space-y-2">
+                                        <Label htmlFor="segment">Segmento de Atuação</Label>
+                                        <Input id="segment" {...register("segment")} placeholder="Tecnologia, Varejo, Saúde..." className="bg-background" />
+                                        {errors.segment && <p className="text-sm text-red-500">{errors.segment.message}</p>}
                                     </div>
-                                    {errors.channels && <p className="text-sm text-red-500">{errors.channels.message}</p>}
+
+                                    <div className="space-y-3">
+                                        <Label>Faturamento Mensal Estimado</Label>
+                                        <Controller
+                                            name="monthlyRevenue"
+                                            control={control}
+                                            render={({ field }) => (
+                                                <RadioGroup onValueChange={field.onChange} defaultValue={field.value} className="flex flex-col space-y-1">
+                                                    <div className="flex items-center space-x-2"><RadioGroupItem value="Até 50k" id="mr1" /><Label htmlFor="mr1">Até R$ 50 mil</Label></div>
+                                                    <div className="flex items-center space-x-2"><RadioGroupItem value="50k a 200k" id="mr2" /><Label htmlFor="mr2">R$ 50k a R$ 200k</Label></div>
+                                                    <div className="flex items-center space-x-2"><RadioGroupItem value="200k a 500k" id="mr3" /><Label htmlFor="mr3">R$ 200k a R$ 500k</Label></div>
+                                                    <div className="flex items-center space-x-2"><RadioGroupItem value="Acima de 500k" id="mr4" /><Label htmlFor="mr4">Acima de R$ 500k</Label></div>
+                                                </RadioGroup>
+                                            )}
+                                        />
+                                        {errors.monthlyRevenue && <p className="text-sm text-red-500">{errors.monthlyRevenue.message}</p>}
+                                    </div>
+
+                                    <div className="space-y-3">
+                                        <Label>Tamanho da Equipe</Label>
+                                        <Controller
+                                            name="teamSize"
+                                            control={control}
+                                            render={({ field }) => (
+                                                <RadioGroup onValueChange={field.onChange} defaultValue={field.value} className="flex flex-col space-y-1">
+                                                    <div className="flex items-center space-x-2"><RadioGroupItem value="1-10" id="t1" /><Label htmlFor="t1">1 a 10 colaboradores</Label></div>
+                                                    <div className="flex items-center space-x-2"><RadioGroupItem value="11-50" id="t2" /><Label htmlFor="t2">11 a 50 colaboradores</Label></div>
+                                                    <div className="flex items-center space-x-2"><RadioGroupItem value="51-200" id="t3" /><Label htmlFor="t3">51 a 200 colaboradores</Label></div>
+                                                    <div className="flex items-center space-x-2"><RadioGroupItem value="200+" id="t4" /><Label htmlFor="t4">Mais de 200</Label></div>
+                                                </RadioGroup>
+                                            )}
+                                        />
+                                        {errors.teamSize && <p className="text-sm text-red-500">{errors.teamSize.message}</p>}
+                                    </div>
+
+                                    <div className="space-y-3">
+                                        <Label>Volume Mensal de Clientes</Label>
+                                        <Controller
+                                            name="customerVolume"
+                                            control={control}
+                                            render={({ field }) => (
+                                                <RadioGroup onValueChange={field.onChange} defaultValue={field.value} className="flex flex-col space-y-1">
+                                                    <div className="flex items-center space-x-2"><RadioGroupItem value="Menos de 50" id="cv1" /><Label htmlFor="cv1">Menos de 50</Label></div>
+                                                    <div className="flex items-center space-x-2"><RadioGroupItem value="50 a 200" id="cv2" /><Label htmlFor="cv2">50 a 200</Label></div>
+                                                    <div className="flex items-center space-x-2"><RadioGroupItem value="200 a 1000" id="cv3" /><Label htmlFor="cv3">200 a 1000</Label></div>
+                                                    <div className="flex items-center space-x-2"><RadioGroupItem value="Mais de 1000" id="cv4" /><Label htmlFor="cv4">Mais de 1000 (Massivo)</Label></div>
+                                                </RadioGroup>
+                                            )}
+                                        />
+                                        {errors.customerVolume && <p className="text-sm text-red-500">{errors.customerVolume.message}</p>}
+                                    </div>
+                                    
+                                    <div className="space-y-3 md:col-span-2">
+                                        <Label>Canais Principais de Aquisição (Todos que aplicam)</Label>
+                                        <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+                                            {["WhatsApp", "Instagram", "Google Ads", "LinkedIn", "Prospecção Ativa", "Indicações", "Site/SEO", "Eventos"].map((ch) => (
+                                                <div key={ch} className="flex items-center space-x-2">
+                                                    <Checkbox
+                                                        id={`ch-${ch}`}
+                                                        checked={watch("channels")?.includes(ch)}
+                                                        onCheckedChange={(checked) => {
+                                                            const val = watch("channels") || [];
+                                                            form.setValue("channels", checked ? [...val, ch] : val.filter((v: any) => v !== ch), { shouldValidate: true });
+                                                        }}
+                                                    />
+                                                    <Label htmlFor={`ch-${ch}`}>{ch}</Label>
+                                                </div>
+                                            ))}
+                                        </div>
+                                        {errors.channels && <p className="text-sm text-red-500">{errors.channels.message}</p>}
+                                    </div>
+
+                                    <div className="space-y-3">
+                                        <Label>Leads (Oportunidades) por Mês</Label>
+                                        <Controller
+                                            name="monthlyLeads"
+                                            control={control}
+                                            render={({ field }) => (
+                                                <RadioGroup onValueChange={field.onChange} defaultValue={field.value} className="flex flex-col space-y-1">
+                                                    <div className="flex items-center space-x-2"><RadioGroupItem value="Menos de 100" id="ml1" /><Label htmlFor="ml1">Menos de 100</Label></div>
+                                                    <div className="flex items-center space-x-2"><RadioGroupItem value="100 a 500" id="ml2" /><Label htmlFor="ml2">100 a 500</Label></div>
+                                                    <div className="flex items-center space-x-2"><RadioGroupItem value="500 a 2000" id="ml3" /><Label htmlFor="ml3">500 a 2000</Label></div>
+                                                    <div className="flex items-center space-x-2"><RadioGroupItem value="Mais de 2000" id="ml4" /><Label htmlFor="ml4">Mais de 2000</Label></div>
+                                                </RadioGroup>
+                                            )}
+                                        />
+                                        {errors.monthlyLeads && <p className="text-sm text-red-500">{errors.monthlyLeads.message}</p>}
+                                    </div>
+                                    
+                                    <div className="space-y-3">
+                                        <Label>Taxa de Conversão Média</Label>
+                                        <Controller
+                                            name="conversionRate"
+                                            control={control}
+                                            render={({ field }) => (
+                                                <RadioGroup onValueChange={field.onChange} defaultValue={field.value} className="flex flex-col space-y-1">
+                                                    <div className="flex items-center space-x-2"><RadioGroupItem value="Desconhecida" id="cr1" /><Label htmlFor="cr1">Desconhecida</Label></div>
+                                                    <div className="flex items-center space-x-2"><RadioGroupItem value="Abaixo de 2%" id="cr2" /><Label htmlFor="cr2">Abaixo de 2%</Label></div>
+                                                    <div className="flex items-center space-x-2"><RadioGroupItem value="2% a 10%" id="cr3" /><Label htmlFor="cr3">2% a 10%</Label></div>
+                                                    <div className="flex items-center space-x-2"><RadioGroupItem value="Acima de 10%" id="cr4" /><Label htmlFor="cr4">Acima de 10%</Label></div>
+                                                </RadioGroup>
+                                            )}
+                                        />
+                                        {errors.conversionRate && <p className="text-sm text-red-500">{errors.conversionRate.message}</p>}
+                                    </div>
+
+                                    <div className="space-y-3 md:col-span-2">
+                                        <Label>Tempo Médio de Resposta a Leads</Label>
+                                        <Controller
+                                            name="responseTime"
+                                            control={control}
+                                            render={({ field }) => (
+                                                <RadioGroup onValueChange={field.onChange} defaultValue={field.value} className="flex flex-col space-y-1">
+                                                    <div className="flex items-center space-x-2"><RadioGroupItem value="Imediato" id="rt1" /><Label htmlFor="rt1">Imediato (em minutos)</Label></div>
+                                                    <div className="flex items-center space-x-2"><RadioGroupItem value="Algumas horas" id="rt2" /><Label htmlFor="rt2">Em algumas horas</Label></div>
+                                                    <div className="flex items-center space-x-2"><RadioGroupItem value="Até 24h" id="rt3" /><Label htmlFor="rt3">Em até 24 horas</Label></div>
+                                                    <div className="flex items-center space-x-2"><RadioGroupItem value="Mais de 24h" id="rt4" /><Label htmlFor="rt4">Mais de 24 horas</Label></div>
+                                                </RadioGroup>
+                                            )}
+                                        />
+                                        {errors.responseTime && <p className="text-sm text-red-500">{errors.responseTime.message}</p>}
+                                    </div>
                                 </div>
                             </div>
                         </div>
 
                         <div className={currentStep === 2 ? "block" : "hidden"}>
                             <div className="space-y-6">
-                                <div className="space-y-3">
+                                <div className="space-y-2">
+                                    <Label htmlFor="manualTasks">Principais Tarefas Manuais Hoje</Label>
+                                    <Input id="manualTasks" {...register("manualTasks")} placeholder="Ex: Digitar dados no ERP, responder dúvidas padrão, criar planilhas..." className="bg-background" />
+                                    {errors.manualTasks && <p className="text-sm text-red-500">{errors.manualTasks.message}</p>}
+                                </div>
+
+                                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                                    <div className="space-y-3">
+                                        <Label>Tempo Gasto em Trabalho Manual / Repetitivo</Label>
+                                        <Controller
+                                            name="hoursLost"
+                                            control={control}
+                                            render={({ field }) => (
+                                                <RadioGroup onValueChange={field.onChange} defaultValue={field.value} className="flex flex-col space-y-1">
+                                                    <div className="flex items-center space-x-2"><RadioGroupItem value="Até 2h/dia" id="hl1" /><Label htmlFor="hl1">Até 2h/dia por pessoa</Label></div>
+                                                    <div className="flex items-center space-x-2"><RadioGroupItem value="3 a 5h/dia" id="hl2" /><Label htmlFor="hl2">3 a 5h/dia por pessoa</Label></div>
+                                                    <div className="flex items-center space-x-2"><RadioGroupItem value="Mais de 5h/dia" id="hl3" /><Label htmlFor="hl3">Mais de 5h/dia por pessoa</Label></div>
+                                                    <div className="flex items-center space-x-2"><RadioGroupItem value="Não sei medir" id="hl4" /><Label htmlFor="hl4">Não sei medir, mas é muito</Label></div>
+                                                </RadioGroup>
+                                            )}
+                                        />
+                                        {errors.hoursLost && <p className="text-sm text-red-500">{errors.hoursLost.message}</p>}
+                                    </div>
+
+                                    <div className="space-y-3">
+                                        <Label>Nível de Uso de CRM</Label>
+                                        <Controller
+                                            name="crmUsage"
+                                            control={control}
+                                            render={({ field }) => (
+                                                <RadioGroup onValueChange={field.onChange} defaultValue={field.value} className="flex flex-col space-y-1">
+                                                    <div className="flex items-center space-x-2"><RadioGroupItem value="Não usamos" id="cu1" /><Label htmlFor="cu1">Não usamos CRM</Label></div>
+                                                    <div className="flex items-center space-x-2"><RadioGroupItem value="Básico as vezes" id="cu2" /><Label htmlFor="cu2">Uso básico/desorganizado</Label></div>
+                                                    <div className="flex items-center space-x-2"><RadioGroupItem value="Processo estruturado" id="cu3" /><Label htmlFor="cu3">Uso contínuo e estruturado</Label></div>
+                                                    <div className="flex items-center space-x-2"><RadioGroupItem value="Avançado com automações" id="cu4" /><Label htmlFor="cu4">Avançado (Automação Base)</Label></div>
+                                                </RadioGroup>
+                                            )}
+                                        />
+                                        {errors.crmUsage && <p className="text-sm text-red-500">{errors.crmUsage.message}</p>}
+                                    </div>
+
+                                    <div className="space-y-3">
+                                        <Label>Nível Atual de Automação</Label>
+                                        <Controller
+                                            name="automationLevel"
+                                            control={control}
+                                            render={({ field }) => (
+                                                <RadioGroup onValueChange={field.onChange} defaultValue={field.value} className="flex flex-col space-y-1">
+                                                    <div className="flex items-center space-x-2"><RadioGroupItem value="Nenhuma" id="al1" /><Label htmlFor="al1">Nenhuma (Tudo manual)</Label></div>
+                                                    <div className="flex items-center space-x-2"><RadioGroupItem value="Básica" id="al2" /><Label htmlFor="al2">Básica (Make/Zapier simples)</Label></div>
+                                                    <div className="flex items-center space-x-2"><RadioGroupItem value="Moderada" id="al3" /><Label htmlFor="al3">Moderada</Label></div>
+                                                    <div className="flex items-center space-x-2"><RadioGroupItem value="Avançada" id="al4" /><Label htmlFor="al4">Avançada (RPA e IA)</Label></div>
+                                                </RadioGroup>
+                                            )}
+                                        />
+                                        {errors.automationLevel && <p className="text-sm text-red-500">{errors.automationLevel.message}</p>}
+                                    </div>
+                                </div>
+
+                                <div className="space-y-3 mt-6">
                                     <Label>Tecnologias que já utilizam na operação</Label>
-                                    <p className="text-sm text-muted-foreground pb-2">Isso define a maturidade para integração.</p>
+                                    <p className="text-sm text-muted-foreground pb-2">Isso define a viabilidade de integração.</p>
                                     <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                                        {["CRM (Hubspot, RD, Salesforce, etc)", "ERP (SAP, Totvs, Omie, etc)", "Plataforma de Atendimento Externa", "Automação (Zapier / Make)", "Possui APIs próprias e expostas"].map((st) => (
+                                        {["Hubspot", "RD Station CRM", "PipeDrive", "Salesforce", "ERP (SAP, Totvs, Omie, Bling)", "Zendesk / Intercom", "Automação (Zapier / Make)", "Modelos IA (OpenAI, Claude)", "APIs Próprias expostas"].map((st) => (
                                             <div key={st} className="flex items-start space-x-2">
                                                 <Checkbox
                                                     id={`st-${st}`}
@@ -391,8 +527,8 @@ export default function AvaliacaoWizard() {
                                 <h3 className="text-2xl font-bold">Quase lá, {watch("name")?.split(" ")[0] || ""}</h3>
                                 <p className="text-muted-foreground mb-6">Seus dados operacionais estão registrados. Nossos algoritmos vão calcular o Score de Automação e propor a arquitetura adequada (Missão).</p>
                                 <div className="bg-muted/30 p-4 rounded-lg text-left text-sm max-w-sm mx-auto space-y-2 border border-border/50">
-                                    <p><strong>Empresa:</strong> {watch("company")}</p>
-                                    <p><strong>Volume/Dia:</strong> {watch("volumeDay")}</p>
+                                    <p><strong>Empresa:</strong> {watch("company")} ({watch("city")})</p>
+                                    <p><strong>Volume Mensal:</strong> {watch("customerVolume")} clientes</p>
                                     <p><strong>Dores Reportadas:</strong> {watch("pains")?.length || 0}</p>
                                 </div>
                                 <div className="mt-8 flex items-start space-x-3 text-left max-w-sm mx-auto bg-primary/5 p-4 rounded-lg border border-primary/20">

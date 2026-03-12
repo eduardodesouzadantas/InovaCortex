@@ -13,8 +13,10 @@
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 export interface ROIInput {
-    teamSize: string;         // "1-5", "6-20", "21-100", "100+"
-    volumeDay: string;        // "< 50", "50-200", "200-1000", "1000+"
+    teamSize: string;         // "1-10", "11-50", "51-200", "200+"
+    volumeDay?: string;       // customer volume string
+    monthlyRevenue?: string;  // revenue band string
+    hoursLost?: string;       // hours lost string
     scoreTotal: number;       // 0-100
     classification: string;   // "Alta prioridade" | "Boa oportunidade" | "Exploratória"
     pains: string[];          // ["Atendimento lento", "Sem CRM", ...]
@@ -40,18 +42,18 @@ export interface ROIResult {
 
 /** Estimated number of manual hours wasted per person per month */
 const HOURS_PER_PERSON_MONTH: Record<string, number> = {
-    "1-5": 40,
-    "6-20": 60,
-    "21-100": 80,
-    "100+": 100,
+    "1-10": 40,
+    "11-50": 60,
+    "51-200": 80,
+    "200+": 100,
 };
 
 /** Approximate headcount midpoint for calculations */
 const TEAM_MIDPOINT: Record<string, number> = {
-    "1-5": 3,
-    "6-20": 12,
-    "21-100": 55,
-    "100+": 150,
+    "1-10": 5,
+    "11-50": 30,
+    "51-200": 120,
+    "200+": 250,
 };
 
 /** Daily volume multiplier on revenue upside */
@@ -85,21 +87,26 @@ const IMPLEMENTATION_COST: Record<string, number> = {
 
 export function calculateROI(input: ROIInput): ROIResult {
     const {
-        teamSize = "6-20",
-        volumeDay = "50-200",
+        teamSize = "11-50",
+        volumeDay = "50 a 200",
+        monthlyRevenue = "",
+        hoursLost = "",
         scoreTotal = 50,
         classification = "Boa oportunidade",
         pains = [],
-        avgHourlyCost = 80,   // BRL/h
-        avgTicket = 2000, // BRL
-        conversionRate = 5,   // %
+        avgHourlyCost = 65,   // BRL/h Conservador
     } = input;
 
     // 1. Base automation rate (% of work automatable) from score
-    const automationRate = Math.min(0.70, (scoreTotal / 100) * 0.75);
+    const automationRate = Math.min(0.60, (scoreTotal / 100) * 0.75); // Max 60% automation
 
     // 2. Hours recovered per month
-    const hoursPerPersonMonth = HOURS_PER_PERSON_MONTH[teamSize] ?? 60;
+    let hoursPerPersonMonth = HOURS_PER_PERSON_MONTH[teamSize] ?? 60;
+    const hl = hoursLost.toLowerCase();
+    if (hl.includes("até 2h")) hoursPerPersonMonth = 30;
+    else if (hl.includes("3 a 5h")) hoursPerPersonMonth = 80;
+    else if (hl.includes("mais de 5h")) hoursPerPersonMonth = 120;
+
     const teamCount = TEAM_MIDPOINT[teamSize] ?? 12;
     const rawHoursRecovered = hoursPerPersonMonth * teamCount * automationRate;
     const monthlyHoursRecovered = Math.round(rawHoursRecovered);
@@ -108,18 +115,22 @@ export function calculateROI(input: ROIInput): ROIResult {
     const painMultiplier = pains.reduce((acc, pain) => {
         return acc * (PAIN_MULTIPLIERS[pain] ?? 1.0);
     }, 1.0);
-    // Cap multiplier at 2x
-    const cappedMultiplier = Math.min(painMultiplier, 2.0);
+    // Cap multiplier at 1.5x for safety
+    const cappedMultiplier = Math.min(painMultiplier, 1.5);
     const operationalSavingsEstimate = Math.round(
         monthlyHoursRecovered * avgHourlyCost * cappedMultiplier
     );
 
-    // 4. Revenue increase estimate
-    const volumeFactor = VOLUME_REVENUE_FACTOR[volumeDay] ?? 1.5;
-    const leadsRecoveredPerMonth = monthlyHoursRecovered * 0.3; // 30% of recovered hours → sales activities
-    const revenueIncreaseEstimate = Math.round(
-        leadsRecoveredPerMonth * (conversionRate / 100) * avgTicket * volumeFactor
-    );
+    // 4. Revenue increase estimate based on reported revenue brackets
+    let revEstimate = 50000;
+    const revLower = monthlyRevenue.toLowerCase();
+    if (revLower.includes("50k a 200k")) revEstimate = 120000;
+    else if (revLower.includes("200k a 500k")) revEstimate = 320000;
+    else if (revLower.includes("acima") || revLower.includes("+")) revEstimate = 750000;
+
+    // We project a conservative 3-12% revenue bump depending on the automation rate
+    const revenueBumpPercent = Math.min(0.15, automationRate * 0.25);
+    const revenueIncreaseEstimate = Math.round(revEstimate * revenueBumpPercent);
 
     // 5. Payback period
     const implementationCost = IMPLEMENTATION_COST[classification] ?? 10000;
@@ -133,12 +144,12 @@ export function calculateROI(input: ROIInput): ROIResult {
     if (scoreTotal >= 70 && teamCount >= 6) confidenceLevel = "Alta";
     else if (scoreTotal >= 45) confidenceLevel = "Média";
 
-    // 7. Display ranges (±25% band)
+    // 7. Display ranges (±15% band for conservatism)
     const formatBRL = (n: number) =>
         `R$ ${Math.round(n / 1000)}k`;
-    const savingsRange = `${formatBRL(operationalSavingsEstimate * 0.75)} – ${formatBRL(operationalSavingsEstimate * 1.25)}`;
-    const revenueRange = `${formatBRL(revenueIncreaseEstimate * 0.75)} – ${formatBRL(revenueIncreaseEstimate * 1.25)}`;
-    const hoursRange = `${Math.round(monthlyHoursRecovered * 0.75)} – ${Math.round(monthlyHoursRecovered * 1.25)} horas`;
+    const savingsRange = `${formatBRL(operationalSavingsEstimate * 0.85)} – ${formatBRL(operationalSavingsEstimate * 1.15)}`;
+    const revenueRange = `${formatBRL(revenueIncreaseEstimate * 0.85)} – ${formatBRL(revenueIncreaseEstimate * 1.15)}`;
+    const hoursRange = `${Math.round(monthlyHoursRecovered * 0.85)} – ${Math.round(monthlyHoursRecovered * 1.15)} horas`;
 
     return {
         operationalSavingsEstimate,

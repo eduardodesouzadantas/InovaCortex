@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getDossierPdfStateBySlug, queueDossierPdfGenerationBySlug } from "@/lib/pdf/dossier-service";
+import { getDossierPdfStateBySlug, generateAndStoreDossierPdf } from "@/lib/pdf/dossier-service";
 
 export const runtime = "nodejs";
+export const maxDuration = 60;
 
 const POLL_INTERVAL_MS = 2000;
 const POLL_TIMEOUT_MS = 120000;
@@ -11,26 +12,53 @@ export async function POST(
     { params }: { params: Promise<{ slug: string }> }
 ) {
     const { slug } = await params;
-    const state = await queueDossierPdfGenerationBySlug(slug);
+    
+    // Check current state before generating
+    const state = await getDossierPdfStateBySlug(slug);
 
     if (!state.found) {
         return NextResponse.json({ error: "Dossie nao encontrado" }, { status: 404 });
     }
 
-    return NextResponse.json(
-        {
-            slug,
-            status: state.status,
-            pdfUrl: state.url ?? null,
-            requestedAt: state.requestedAt ?? null,
-            generatedAt: state.generatedAt ?? null,
-            error: state.error ?? null,
-            queueId: state.queueId ?? null,
-            statusUrl: `/api/pdf/${encodeURIComponent(slug)}?mode=status`,
-            downloadUrl: state.url ?? `/api/pdf/${encodeURIComponent(slug)}?mode=download`,
-        },
-        { status: state.status === "ready" ? 200 : 202 }
-    );
+    if (state.status === "ready" && state.url) {
+        return NextResponse.json(
+            {
+                slug,
+                status: "ready",
+                pdfUrl: state.url,
+                requestedAt: state.requestedAt ?? null,
+                generatedAt: state.generatedAt ?? null,
+                error: null,
+                queueId: state.queueId ?? null,
+                statusUrl: `/api/pdf/${encodeURIComponent(slug)}?mode=status`,
+                downloadUrl: state.url,
+            },
+            { status: 200 }
+        );
+    }
+
+    try {
+        const result = await generateAndStoreDossierPdf({ slug });
+        return NextResponse.json(
+            {
+                slug: result.slug,
+                status: "ready",
+                pdfUrl: result.url,
+                requestedAt: state.requestedAt ?? new Date().toISOString(),
+                generatedAt: new Date().toISOString(),
+                error: null,
+                queueId: null,
+                statusUrl: `/api/pdf/${encodeURIComponent(slug)}?mode=status`,
+                downloadUrl: result.url,
+            },
+            { status: 200 }
+        );
+    } catch (error) {
+        return NextResponse.json(
+            { error: String(error), status: "failed" }, 
+            { status: 500 }
+        );
+    }
 }
 
 export async function GET(
@@ -65,7 +93,7 @@ export async function GET(
         return NextResponse.redirect(buildRedirectUrl(request.url, state.url), 307);
     }
 
-    await queueDossierPdfGenerationBySlug(slug);
+    // Removed queue mapping, POST endpoint now handles synchronous blocking generation
 
     if (mode === "download") {
         return new NextResponse(buildPendingHtml(slug), {

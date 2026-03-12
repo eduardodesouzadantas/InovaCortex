@@ -1,0 +1,234 @@
+{
+    "baseUrl":  "http://localhost:3000",
+    "orgSlug":  "inovacortex",
+    "agencyLogin":  {
+                        "status":  null,
+                        "body":  null,
+                        "error":  "O servidor remoto retornou um erro: (401) Não Autorizado."
+                    },
+    "orgLogin":  {
+                     "status":  null,
+                     "body":  null,
+                     "error":  "O servidor remoto retornou um erro: (401) Não Autorizado."
+                 },
+    "agencyRoutes":  [
+                         {
+                             "path":  "/agency/dashboard",
+                             "status":  200,
+                             "finalUrl":  "http://localhost:3000/agency/login",
+                             "fatalMarker":  false,
+                             "isLoginPage":  true,
+                             "error":  null
+                         },
+                         {
+                             "path":  "/agency/command-center",
+                             "status":  200,
+                             "finalUrl":  "http://localhost:3000/agency/login",
+                             "fatalMarker":  false,
+                             "isLoginPage":  true,
+                             "error":  null
+                         },
+                         {
+                             "path":  "/agency/war-room",
+                             "status":  200,
+                             "finalUrl":  "http://localhost:3000/agency/login",
+                             "fatalMarker":  false,
+                             "isLoginPage":  true,
+                             "error":  null
+                         },
+                         {
+                             "path":  "/agency/executive-pack",
+                             "status":  200,
+                             "finalUrl":  "http://localhost:3000/agency/login",
+                             "fatalMarker":  false,
+                             "isLoginPage":  true,
+                             "error":  null
+                         },
+                         {
+                             "path":  "/agency/builder",
+                             "status":  200,
+                             "finalUrl":  "http://localhost:3000/agency/login",
+                             "fatalMarker":  false,
+                             "isLoginPage":  true,
+                             "error":  null
+                         },
+                         {
+                             "path":  "/agency/pipeline",
+                             "status":  200,
+                             "finalUrl":  "http://localhost:3000/agency/login",
+                             "fatalMarker":  false,
+                             "isLoginPage":  true,
+                             "error":  null
+                         },
+                         {
+                             "path":  "/agency/sales",
+                             "status":  200,
+                             "finalUrl":  "http://localhost:3000/agency/login",
+                             "fatalMarker":  false,
+                             "isLoginPage":  true,
+                             "error":  null
+                         },
+                         {
+                             "path":  "/agency/marketing",
+                             "status":  200,
+                             "finalUrl":  "http://localhost:3000/agency/login",
+                             "fatalMarker":  false,
+                             "isLoginPage":  true,
+                             "error":  null
+                         },
+                         {
+                             "path":  "/agency/marketing/creative",
+                             "status":  200,
+                             "finalUrl":  "http://localhost:3000/agency/login",
+                             "fatalMarker":  false,
+                             "isLoginPage":  true,
+                             "error":  null
+                         },
+                         {
+                             "path":  "/agency/marketing/publishing",
+                             "status":  200,
+                             "finalUrl":  "http://localhost:3000/agency/login",
+                             "fatalMarker":  false,
+                             "isLoginPage":  true,
+                             "error":  null
+                         },
+                         {
+                             "path":  "/agency/outreach",
+                             "status":  200,
+                             "finalUrl":  "http://localhost:3000/agency/login",
+                             "fatalMarker":  false,
+                             "isLoginPage":  true,
+                             "error":  null
+                         },
+                         {
+                             "path":  "/agency/operations",
+                             "status":  200,
+                             "finalUrl":  "http://localhost:3000/agency/login",
+                             "fatalMarker":  false,
+                             "isLoginPage":  true,
+                             "error":  null
+                         }
+                     ],
+    "orgRoutes":  [
+                      {
+                          "path":  "/org/inovacortex/admin",
+                          "status":  200,
+                          "finalUrl":  "http://localhost:3000/org/inovacortex/admin/login",
+                          "fatalMarker":  false,
+                          "isLoginPage":  true,
+                          "error":  null
+                      },
+                      {
+                          "path":  "/org/inovacortex/admin/command-center",
+                          "status":  200,
+                          "finalUrl":  "http://localhost:3000/org/inovacortex/admin/login",
+                          "fatalMarker":  false,
+                          "isLoginPage":  true,
+                          "error":  null
+                      },
+                      {
+                          "path":  "/org/inovacortex/admin/executive-pack",
+                          "status":  200,
+                          "finalUrl":  "http://localhost:3000/org/inovacortex/admin/login",
+                          "fatalMarker":  false,
+                          "isLoginPage":  true,
+                          "error":  null
+                      },
+                      {
+                          "path":  "/org/inovacortex/admin/sales",
+                          "status":  200,
+                          "finalUrl":  "http://localhost:3000/org/inovacortex/admin/login",
+                          "fatalMarker":  false,
+                          "isLoginPage":  true,
+                          "error":  null
+                      },
+                      {
+                          "path":  "/org/inovacortex/admin/deals",
+                          "status":  200,
+                          "finalUrl":  "http://localhost:3000/org/inovacortex/admin/login",
+                          "fatalMarker":  false,
+                          "isLoginPage":  true,
+                          "error":  null
+                      },
+                      {
+                          "path":  "/org/inovacortex/admin/cockpit",
+                          "status":  200,
+                          "finalUrl":  "http://localhost:3000/org/inovacortex/admin/login",
+                          "fatalMarker":  false,
+                          "isLoginPage":  true,
+                          "error":  null
+                      },
+                      {
+                          "path":  "/org/inovacortex/admin/marketing",
+                          "status":  200,
+                          "finalUrl":  "http://localhost:3000/org/inovacortex/admin/login",
+                          "fatalMarker":  false,
+                          "isLoginPage":  true,
+                          "error":  null
+                      },
+                      {
+                          "path":  "/org/inovacortex/admin/content",
+                          "status":  200,
+                          "finalUrl":  "http://localhost:3000/org/inovacortex/admin/login",
+                          "fatalMarker":  false,
+                          "isLoginPage":  true,
+                          "error":  null
+                      },
+                      {
+                          "path":  "/org/inovacortex/admin/whatsapp",
+                          "status":  200,
+                          "finalUrl":  "http://localhost:3000/org/inovacortex/admin/login",
+                          "fatalMarker":  false,
+                          "isLoginPage":  true,
+                          "error":  null
+                      },
+                      {
+                          "path":  "/org/inovacortex/admin/performance",
+                          "status":  200,
+                          "finalUrl":  "http://localhost:3000/org/inovacortex/admin/login",
+                          "fatalMarker":  false,
+                          "isLoginPage":  true,
+                          "error":  null
+                      },
+                      {
+                          "path":  "/org/inovacortex/admin/outbound",
+                          "status":  200,
+                          "finalUrl":  "http://localhost:3000/org/inovacortex/admin/login",
+                          "fatalMarker":  false,
+                          "isLoginPage":  true,
+                          "error":  null
+                      },
+                      {
+                          "path":  "/org/inovacortex/admin/workspaces",
+                          "status":  200,
+                          "finalUrl":  "http://localhost:3000/org/inovacortex/admin/login",
+                          "fatalMarker":  false,
+                          "isLoginPage":  true,
+                          "error":  null
+                      }
+                  ],
+    "health":  {
+                   "status":  200,
+                   "body":  {
+                                "success":  true,
+                                "data":  {
+                                             "database":  "ok",
+                                             "eventBus":  "ok",
+                                             "workers":  "warning",
+                                             "marketingEngine":  "warning",
+                                             "salesEngine":  "warning",
+                                             "publishingEngine":  "ok",
+                                             "timestamp":  "2026-03-11T01:16:02.873Z"
+                                         },
+                                "requestId":  "1d4353c9-156a-4610-b9d7-e8ee306ab8eb"
+                            },
+                   "error":  null
+               },
+    "scheduler":  {
+                      "status":  null,
+                      "body":  null,
+                      "error":  "O servidor remoto retornou um erro: (401) Não Autorizado.",
+                      "usedSecret":  false
+                  },
+    "generatedAt":  "2026-03-10T22:16:04.6440800-03:00"
+}

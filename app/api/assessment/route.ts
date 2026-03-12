@@ -21,16 +21,34 @@ const assessmentSchema = z.object({
     email: z.string().trim().email(),
     company: z.string().trim().min(2),
     role: z.string().trim().min(2),
-    segment: z.string().trim().min(2),
-    teamSize: z.string().min(1),
-    volumeDay: z.string().min(1),
-    channels: z.array(z.string()).min(1),
-    stack: z.array(z.string()),
-    pains: z.array(z.string()).min(1),
-    urgency: z.string().min(2),
-    goal: z.string().min(2),
     phone: z.string().trim().min(10, "WhatsApp inválido"),
     whatsappConsent: z.boolean().default(false), // V3 - Add Consent flag
+    
+    // Elementos de contexto da empresa
+    segment: z.string().trim().min(2),
+    city: z.string().trim().min(2),
+    monthlyRevenue: z.string().min(1),
+    teamSize: z.string().min(1),
+    customerVolume: z.string().min(1),
+
+    // Lead Acquisition
+    channels: z.array(z.string()).min(1),
+    monthlyLeads: z.string().min(1),
+    conversionRate: z.string().min(1),
+    responseTime: z.string().min(1),
+
+    // Operations
+    manualTasks: z.string().min(2),
+    hoursLost: z.string().min(1),
+    crmUsage: z.string().min(1),
+    automationLevel: z.string().min(1),
+
+    stack: z.array(z.string()),
+
+    pains: z.array(z.string()).min(1),
+    urgency: z.string().min(1),
+    goal: z.string().min(1),
+
     honeypot: z.string().optional() // Anti-spam
 });
 
@@ -91,15 +109,24 @@ export async function POST(request: Request) {
         }
 
         // 3. Calculate Score
-        const payload: AssessmentPayload = {
+        const payload: any = {
             name: validatedData.name,
             email: validatedData.email,
             company: validatedData.company,
             role: validatedData.role,
             segment: validatedData.segment,
+            city: validatedData.city,
+            monthlyRevenue: validatedData.monthlyRevenue,
             teamSize: validatedData.teamSize,
-            volumeDay: validatedData.volumeDay,
+            customerVolume: validatedData.customerVolume,
             channels: validatedData.channels,
+            monthlyLeads: validatedData.monthlyLeads,
+            conversionRate: validatedData.conversionRate,
+            responseTime: validatedData.responseTime,
+            manualTasks: validatedData.manualTasks,
+            hoursLost: validatedData.hoursLost,
+            crmUsage: validatedData.crmUsage,
+            automationLevel: validatedData.automationLevel,
             stack: validatedData.stack,
             pains: validatedData.pains,
             urgency: validatedData.urgency,
@@ -110,29 +137,58 @@ export async function POST(request: Request) {
 
         // --- Generate Artifact Report Content ---
         const publicSlug = crypto.randomUUID();
+        const pStr = JSON.stringify(payload).toLowerCase();
 
-        const risks = [
-            "LGPD e conformidade na manipulação de dados de clientes",
-            "Segurança no acesso a sistemas legados",
-            "Dependências de APIs de terceiros e limites de rate"
-        ];
+        // Dynamic Risks based on stack/pains
+        const risks = [];
+        if (pStr.includes("sap") || pStr.includes("totvs") || pStr.includes("erp") || pStr.includes("bling")) {
+            risks.push("Limitações de API e gargalos de integração no ERP atual");
+        }
+        if (payload.channels.includes("WhatsApp") || payload.channels.includes("Instagram")) {
+            risks.push("Risco de bloqueio de contas por automações não oficiais na Meta");
+            risks.push("Desconexão dos canais de mensagem com o CRM, gerando perda de histórico");
+        } else {
+            risks.push("Falta de canais de aquisição instantânea (WhatsApp/Insta) estruturados");
+        }
+        if (pStr.includes("tempo") || pStr.includes("manual") || pStr.includes("mais de 5h")) {
+            risks.push("Dependência crítica de capital humano para tarefas repetitivas (Single point of failure)");
+        }
+        if (risks.length < 3) risks.push("Falta de visibilidade centralizada (Dashboard unificado) da operação");
 
+        // Dynamic Questions
         const questions = [
-            `Considerando que o time de ${payload.teamSize} usa ${payload.channels.join(", ")}, qual a maior dificuldade em centralizar a operação?`,
-            `Vocês já tentaram resolver a dor "${payload.pains[0] || 'mencionada'}" no passado? O que impediu o sucesso?`,
-            `Com o foco em "${payload.goal}", vocês têm processos padronizados que uma IA poderia seguir?`
+            `Seu time perde ${payload.hoursLost || "várias horas"} diariamente apenas em trabalho manual. Qual o real impacto financeiro disso na ${payload.company}?`,
+            `Com a taxa de conversão atual (${payload.conversionRate || "desconhecida"}), quanto faturamento vocês estimam deixar na mesa todo mês?`,
+            `Considerando o objetivo de "${payload.goal}", vocês possuem os processos de atendimento documentados para treinar uma Inteligência Artificial?`
         ];
+
+        // Dynamic Blueprint Modules
+        const modules = ["Plataforma Central de Inteligência InovaCortex"];
+        if (payload.channels.includes("WhatsApp")) modules.push("Agente Conversacional L1 (Integração Meta)");
+        if (pStr.includes("crm") || pStr.includes("rd") || pStr.includes("hubspot")) modules.push("Orquestrador Bidirecional (CRM <-> InovaCortex)");
+        if (pStr.includes("erp") || pStr.includes("sap")) modules.push("Gateway de Integração de Sistemas (Consultas seguras ERP)");
+        if (pStr.includes("manual") || pStr.includes("planilha")) modules.push("Automação de Backoffice (RPA Background)");
+        if (modules.length === 1) modules.push("Agent Assist (Co-piloto humano)", "Dashboard Analytics in Real-Time");
 
         const blueprint = {
-            modules: ["Automação de Triagem", "Agente de Resolução", "Integração CRM/ERP", "Dashboard de Métricas"],
-            integrations: payload.stack && payload.stack.length > 0 ? payload.stack : ["CRM/ERP padrão", "Plataforma de Mensageria API"]
+            modules: modules.slice(0, 4),
+            integrations: payload.stack && payload.stack.length > 0 
+                ? payload.stack 
+                : ["WhatsApp Cloud API", "Make/n8n", "InovaCortex Engine"]
         };
 
+        // Dynamic Roadmap
         const roadmap = [
-            { phase: "Semana 1", title: "Setup Inicial e Mapeamento", description: "Configuração de ambiente, acessos e integrações básicas." },
-            { phase: "Semana 2-3", title: "Desenvolvimento de Agentes", description: "Treinamento, fluxos conversacionais e testes controlados." },
-            { phase: "Semana 4", title: "Mission Control e Ajustes", description: "Lançamento supervisionado, métricas em tempo real e passagem de conhecimento." }
+            { phase: "Semana 1", title: "Mapeamento & Infraestrutura", description: `Análise dos fluxos da ${payload.company} e auditoria de acessos aos sistemas (${payload.stack.slice(0,2).join(", ") || "Ferramentas base"}).` },
+            { phase: "Semana 2", title: "Setup do Tenant", description: "Configuração da instância InovaCortex e conexão segura com os canais autorizados." },
         ];
+        
+        if (scoreResult.classification === "Alta prioridade" || pStr.includes("avançada")) {
+            roadmap.push({ phase: "Semana 3-4", title: "Implantação Avançada", description: "Treinamento do Agente IA com base de conhecimento proprietária e ativação de integrações profundas." });
+        } else {
+            roadmap.push({ phase: "Semana 3", title: "Desenvolvimento do Piloto", description: "Criação do primeiro Agente Conversacional focado na principal dor mapeada." });
+            roadmap.push({ phase: "Semana 4", title: "Go-Live Controlado", description: "Início da operação híbrida (IA + Equipe) com monitoramento em tempo real (Shadow Mode)." });
+        }
 
         const assessmentData = {
             organizationId,  // V9: tenant isolation
@@ -142,7 +198,7 @@ export async function POST(request: Request) {
             role: payload.role,
             segment: payload.segment,
             teamSize: payload.teamSize,
-            volumeDay: payload.volumeDay,
+            volumeDay: payload.customerVolume, // Map to existing col
             channels: JSON.stringify(payload.channels),
             stack: JSON.stringify(payload.stack),
             pains: JSON.stringify(payload.pains),
@@ -153,7 +209,18 @@ export async function POST(request: Request) {
             scoreTotal: scoreResult.scoreTotal,
             scoreBreakdown: JSON.stringify(scoreResult.scoreBreakdown),
             classification: scoreResult.classification,
-            recommendedMissions: JSON.stringify(scoreResult.recommendedMissions)
+            recommendedMissions: JSON.stringify(scoreResult.recommendedMissions),
+            internalNotes: JSON.stringify({ // Safe schema-less packing
+                city: payload.city,
+                monthlyRevenue: payload.monthlyRevenue,
+                monthlyLeads: payload.monthlyLeads,
+                conversionRate: payload.conversionRate,
+                responseTime: payload.responseTime,
+                manualTasks: payload.manualTasks,
+                hoursLost: payload.hoursLost,
+                crmUsage: payload.crmUsage,
+                automationLevel: payload.automationLevel
+            })
         };
 
         const dossierContent = {
@@ -191,7 +258,9 @@ export async function POST(request: Request) {
             // V7: Auto-generate ROI Projection
             const roiInput = {
                 teamSize: payload.teamSize,
-                volumeDay: payload.volumeDay,
+                volumeDay: payload.customerVolume,
+                monthlyRevenue: payload.monthlyRevenue,
+                hoursLost: payload.hoursLost,
                 scoreTotal: scoreResult.scoreTotal,
                 classification: scoreResult.classification,
                 pains: payload.pains,

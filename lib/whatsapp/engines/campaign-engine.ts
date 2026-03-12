@@ -1,4 +1,4 @@
-﻿import crypto from "crypto";
+import crypto from "crypto";
 import { prisma } from "@/lib/prisma";
 import { sendWhatsAppTemplateForOrg } from "@/lib/whatsapp/meta-client";
 import { logger } from "@/lib/logger";
@@ -10,7 +10,7 @@ const MAX_SEND_ATTEMPTS = 3;
 const STALE_PROCESSING_WINDOW_MS = 5 * 60 * 1000;
 const IDEMPOTENCY_BATCH_WINDOW_MS = 10 * 60 * 1000;
 
-export const CAMPAIGN_QUEUE_ACTION_TYPE = "generate_pdf_report";
+export const CAMPAIGN_QUEUE_ACTION_TYPE = "whatsapp_campaign_execution";
 
 type SegmentQuery = {
   lifecycle?: string | string[];
