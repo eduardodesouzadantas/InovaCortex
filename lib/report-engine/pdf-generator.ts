@@ -1,4 +1,6 @@
 import chromium from "@sparticuz/chromium";
+import { existsSync } from "fs";
+import { unlink } from "fs/promises";
 import puppeteer, { type Browser } from "puppeteer-core";
 
 export interface GeneratePdfInput {
@@ -112,7 +114,10 @@ async function launchBrowser(): Promise<{ browser: Browser; remote: boolean }> {
 async function resolveExecutablePath(): Promise<string> {
     const configured =
         (process.env.PUPPETEER_EXECUTABLE_PATH ?? process.env.CHROMIUM_EXECUTABLE_PATH ?? "").trim();
+
+    hintServerlessRuntimeForChromium();
     ensureSharedLibraryPath();
+    await invalidateBrokenChromiumCache();
 
     if (configured) return configured;
     return chromium.executablePath();
@@ -135,6 +140,33 @@ function ensureSharedLibraryPath(): void {
         if (!current.includes(path)) current.push(path);
     }
     process.env.LD_LIBRARY_PATH = current.join(":");
+}
+
+function hintServerlessRuntimeForChromium(): void {
+    const isVercelRuntime =
+        process.env.VERCEL === "1" ||
+        Boolean(process.env.NOW_REGION) ||
+        Boolean(process.env.VERCEL_REGION);
+    if (!isVercelRuntime) return;
+
+    if (!process.env.AWS_EXECUTION_ENV && !process.env.AWS_LAMBDA_JS_RUNTIME) {
+        const major = Number.parseInt(process.versions.node.split(".")[0] ?? "20", 10);
+        const runtimeVersion = major >= 22 ? "22.x" : "20.x";
+        process.env.AWS_EXECUTION_ENV = `AWS_Lambda_nodejs${runtimeVersion}`;
+    }
+}
+
+async function invalidateBrokenChromiumCache(): Promise<void> {
+    if (process.platform !== "linux") return;
+
+    const binaryPath = "/tmp/chromium";
+    if (!existsSync(binaryPath)) return;
+
+    const hasAl2Lib = existsSync("/tmp/al2/lib/libnss3.so");
+    const hasAl2023Lib = existsSync("/tmp/al2023/lib/libnss3.so");
+    if (hasAl2Lib || hasAl2023Lib) return;
+
+    await unlink(binaryPath).catch(() => null);
 }
 
 function buildHeaderTemplate(companyName: string): string {
