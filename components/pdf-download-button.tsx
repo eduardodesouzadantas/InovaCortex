@@ -23,7 +23,7 @@ export function PdfDownloadButton({
 
         setIsLoading(true);
         try {
-            const start = await fetch(`/api/pdf/${encodeURIComponent(slug)}`, {
+            const start = await fetch(`/api/pdf/${encodeURIComponent(slug)}?force=1`, {
                 method: "POST",
                 cache: "no-store",
             });

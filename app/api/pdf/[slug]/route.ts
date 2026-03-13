@@ -8,10 +8,11 @@ const POLL_INTERVAL_MS = 2000;
 const POLL_TIMEOUT_MS = 120000;
 
 export async function POST(
-    _request: NextRequest,
+    request: NextRequest,
     { params }: { params: Promise<{ slug: string }> }
 ) {
     const { slug } = await params;
+    const forceRegenerate = request.nextUrl.searchParams.get("force") === "1";
     
     // Check current state before generating
     const state = await getDossierPdfStateBySlug(slug);
@@ -20,7 +21,7 @@ export async function POST(
         return NextResponse.json({ error: "Dossie nao encontrado" }, { status: 404 });
     }
 
-    if (state.status === "ready" && state.url) {
+    if (!forceRegenerate && state.status === "ready" && state.url) {
         return NextResponse.json(
             {
                 slug,
