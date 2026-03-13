@@ -63,9 +63,9 @@ export async function renderBusinessMRIHtml(data: NormalizedBusinessMRIReportDat
       text-rendering: optimizeLegibility;
     }
     .page {
-      width: 210mm;
-      min-height: 297mm;
-      padding: 18mm 14mm 16mm;
+      width: 100%;
+      min-height: 256mm;
+      padding: 10mm 0 8mm;
       position: relative;
       background: var(--report-bg);
       page-break-after: always;
@@ -126,9 +126,9 @@ export async function renderBusinessMRIHtml(data: NormalizedBusinessMRIReportDat
     }
     .cover-footer {
       position: absolute;
-      bottom: 18mm;
-      left: 14mm;
-      right: 14mm;
+      bottom: 10mm;
+      left: 0;
+      right: 0;
       color: #d7dce7;
       font-size: 11px;
       border-top: 1px solid rgba(230, 201, 131, 0.4);
