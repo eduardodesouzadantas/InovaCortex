@@ -140,6 +140,10 @@ function ensureSharedLibraryPath(): void {
         if (!current.includes(path)) current.push(path);
     }
     process.env.LD_LIBRARY_PATH = current.join(":");
+
+    // Required by @sparticuz/chromium font stack; without it PDF can render without visible text.
+    process.env.FONTCONFIG_PATH ??= "/tmp/fonts";
+    process.env.HOME ??= "/tmp";
 }
 
 function hintServerlessRuntimeForChromium(): void {
