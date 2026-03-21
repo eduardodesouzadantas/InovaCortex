@@ -7,15 +7,10 @@ import { UseCasesSection } from "@/components/sections/use-cases";
 import { TestimonialsSection } from "@/components/sections/testimonials";
 import { FinalCtaSection } from "@/components/sections/final-cta";
 import { FadeIn } from "@/components/fade-in";
-import { EmpireCTA } from "@/components/EmpireCTA";
-import { resolveDefaultRedirect } from "@/lib/auth/resolveDefaultRedirect";
 
-export default async function Home() {
-  const redirectPath = await resolveDefaultRedirect();
-
+export default function Home() {
   return (
     <div className="flex flex-col">
-      <EmpireCTA redirectPath={redirectPath} />
       <FadeIn direction="none" delay={0}>
         <HeroSection />
       </FadeIn>

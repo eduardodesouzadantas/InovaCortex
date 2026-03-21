@@ -3,9 +3,36 @@
 export const dynamic = "force-dynamic";
 
 import { useState } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
+import { ArrowRight, Crown, Loader2, Shield, ShieldCheck } from "lucide-react";
+
 import { Button } from "@/components/ui/button";
-import { Shield } from "lucide-react";
+
+type LoginResponseBody = {
+    error?: string;
+    code?: string;
+    success?: boolean;
+};
+
+function toLoginErrorMessage(payload: LoginResponseBody | null | undefined): string {
+    const code = payload?.code?.trim().toUpperCase();
+    const error = payload?.error?.trim().toUpperCase();
+
+    if (code === "UNAUTHORIZED" || error === "INVALID_CREDENTIALS" || error === "UNAUTHORIZED") {
+        return "Credenciais invalidas";
+    }
+
+    if (code === "FORBIDDEN" || error === "FORBIDDEN") {
+        return "Acesso proibido para esta conta";
+    }
+
+    if (code === "SERVICE_UNAVAILABLE" || error === "DATABASE_UNAVAILABLE") {
+        return "Servico temporariamente indisponivel. Tente novamente em instantes.";
+    }
+
+    return payload?.error || "Acesso negado";
+}
 
 export default function AgencyLoginPage() {
     const [email, setEmail] = useState("");
@@ -26,10 +53,10 @@ export default function AgencyLoginPage() {
                 body: JSON.stringify({ email, password }),
             });
 
-            const data = (await res.json()) as { error?: string; success?: boolean };
+            const data = (await res.json()) as LoginResponseBody;
 
             if (!res.ok || !data.success) {
-                setError(data.error || "Acesso negado");
+                setError(toLoginErrorMessage(data));
                 return;
             }
 
@@ -43,35 +70,115 @@ export default function AgencyLoginPage() {
     };
 
     return (
-        <div className="min-h-screen bg-muted/10 flex items-center justify-center pt-20">
-            <div className="max-w-md w-full glass-panel p-8 rounded-2xl border border-primary/20 text-center relative overflow-hidden">
-                <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-red-500 to-primary" />
-                <Shield className="w-12 h-12 text-primary mx-auto mb-6" />
-                <h2 className="text-2xl font-bold mb-2">Agency Access</h2>
-                <p className="text-muted-foreground text-sm mb-6">InovaCortex Control Plane</p>
+        <div className="min-h-screen bg-[#07111d] text-white">
+            <div className="absolute inset-0 bg-[radial-gradient(circle_at_top_left,rgba(34,211,238,0.12),transparent_30%),radial-gradient(circle_at_bottom_right,rgba(14,165,233,0.12),transparent_32%)]" />
+            <div className="relative mx-auto grid min-h-screen max-w-7xl gap-8 px-6 py-10 lg:grid-cols-[1fr_0.9fr] lg:px-8">
+                <section className="rounded-[36px] border border-white/10 bg-white/[0.04] p-8 shadow-[0_30px_120px_rgba(0,0,0,0.24)] md:p-10">
+                    <div className="inline-flex items-center gap-2 rounded-full border border-cyan-400/20 bg-cyan-400/10 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.24em] text-cyan-100">
+                        <Crown className="h-3.5 w-3.5" />
+                        Agency Surface
+                    </div>
 
-                <form onSubmit={handleLogin} className="space-y-4">
-                    <input
-                        type="email"
-                        placeholder="E-mail de acesso..."
-                        value={email}
-                        onChange={(e: React.ChangeEvent<HTMLInputElement>) => setEmail(e.target.value)}
-                        required
-                        className="flex h-12 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background file:border-0 file:bg-transparent file:text-sm file:font-medium placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 text-center text-base"
-                    />
-                    <input
-                        type="password"
-                        placeholder="Senha de acesso..."
-                        value={password}
-                        onChange={(e: React.ChangeEvent<HTMLInputElement>) => setPassword(e.target.value)}
-                        required
-                        className="flex h-12 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background file:border-0 file:bg-transparent file:text-sm file:font-medium placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 text-center tracking-widest text-lg"
-                    />
-                    {error && <p className="text-red-500 text-sm">{error}</p>}
-                    <Button type="submit" className="w-full h-12" disabled={loading}>
-                        {loading ? "Verificando..." : "Autenticar"}
-                    </Button>
-                </form>
+                    <h1 className="mt-6 text-4xl font-semibold tracking-tight md:text-5xl">
+                        Acesso da Agência
+                    </h1>
+                    <p className="mt-4 max-w-2xl text-sm leading-7 text-slate-300 md:text-base">
+                        Entre no console operacional da própria agência. Este login separa a superfície da
+                        agência da superfície da empresa e mantém os fluxos compatíveis com a arquitetura atual.
+                    </p>
+
+                    <div className="mt-8 grid gap-3 sm:grid-cols-2">
+                        <div className="rounded-2xl border border-white/8 bg-black/10 px-4 py-4 text-sm text-slate-300">
+                            Painel e comando da agência.
+                        </div>
+                        <div className="rounded-2xl border border-white/8 bg-black/10 px-4 py-4 text-sm text-slate-300">
+                            Fluxo separado da empresa.
+                        </div>
+                        <div className="rounded-2xl border border-white/8 bg-black/10 px-4 py-4 text-sm text-slate-300">
+                            Compatível com links antigos.
+                        </div>
+                        <div className="rounded-2xl border border-white/8 bg-black/10 px-4 py-4 text-sm text-slate-300">
+                            Funciona em mobile e desktop.
+                        </div>
+                    </div>
+
+                    <div className="mt-8 flex flex-wrap gap-3">
+                        <Link
+                            href="/acesso"
+                            className="inline-flex h-11 items-center justify-center rounded-2xl border border-white/10 px-4 text-sm font-semibold text-slate-200 transition hover:border-white/20 hover:text-white"
+                        >
+                            Voltar para Acesso
+                        </Link>
+                        <Link
+                            href="/acesso?perfil=empresa"
+                            className="inline-flex h-11 items-center justify-center rounded-2xl border border-amber-400/20 bg-amber-400/10 px-4 text-sm font-semibold text-amber-100 transition hover:bg-amber-400/15"
+                        >
+                            Entrar como Empresa
+                        </Link>
+                    </div>
+                </section>
+
+                <section className="rounded-[36px] border border-white/10 bg-[#081525]/95 p-8 shadow-[0_30px_120px_rgba(0,0,0,0.24)] md:p-10">
+                    <div className="flex items-center gap-3">
+                        <div className="rounded-2xl border border-cyan-400/20 bg-cyan-400/10 p-3 text-cyan-200">
+                            <Shield className="h-6 w-6" />
+                        </div>
+                        <div>
+                            <p className="text-[11px] font-semibold uppercase tracking-[0.22em] text-slate-400">
+                                Agency Login
+                            </p>
+                            <h2 className="text-2xl font-semibold tracking-tight">Autenticação da agência</h2>
+                        </div>
+                    </div>
+
+                    <form onSubmit={handleLogin} className="mt-6 space-y-4">
+                        <div>
+                            <label className="mb-2 block text-sm font-medium text-slate-200">E-mail</label>
+                            <input
+                                type="email"
+                                placeholder="E-mail de acesso..."
+                                value={email}
+                                onChange={(e: React.ChangeEvent<HTMLInputElement>) => setEmail(e.target.value)}
+                                required
+                                className="h-12 w-full rounded-2xl border border-white/10 bg-black/20 px-4 text-sm text-white outline-none transition focus:border-cyan-300/40 focus:bg-black/30"
+                            />
+                        </div>
+
+                        <div>
+                            <label className="mb-2 block text-sm font-medium text-slate-200">Senha</label>
+                            <input
+                                type="password"
+                                placeholder="Senha de acesso..."
+                                value={password}
+                                onChange={(e: React.ChangeEvent<HTMLInputElement>) => setPassword(e.target.value)}
+                                required
+                                className="h-12 w-full rounded-2xl border border-white/10 bg-black/20 px-4 text-sm tracking-widest text-white outline-none transition focus:border-cyan-300/40 focus:bg-black/30"
+                            />
+                        </div>
+
+                        {error && <p className="text-sm text-rose-200">{error}</p>}
+
+                        <Button
+                            type="submit"
+                            className="h-12 w-full rounded-2xl bg-cyan-300 text-slate-950 hover:bg-cyan-200"
+                            disabled={loading}
+                        >
+                            {loading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <ArrowRight className="mr-2 h-4 w-4" />}
+                            {loading ? "Verificando..." : "Autenticar"}
+                        </Button>
+                    </form>
+
+                    <div className="mt-6 rounded-2xl border border-white/8 bg-white/[0.03] px-4 py-4 text-sm text-slate-300">
+                        <div className="flex items-center gap-2 font-medium text-slate-100">
+                            <ShieldCheck className="h-4 w-4 text-emerald-300" />
+                            Acesso restrito
+                        </div>
+                        <p className="mt-2 leading-6">
+                            Use este fluxo apenas para contas da agência. A empresa entra pela rota de acesso
+                            principal em <strong>/acesso</strong>.
+                        </p>
+                    </div>
+                </section>
             </div>
         </div>
     );
