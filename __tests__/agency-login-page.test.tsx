@@ -29,8 +29,8 @@ describe("AgencyLoginPage", () => {
         render(<AgencyLoginPage />);
 
         expect(screen.getByText("Acesso da Agência")).toBeInTheDocument();
-        expect(screen.getByRole("link", { name: "Voltar para Acesso" })).toHaveAttribute("href", "/acesso");
-        expect(screen.getByRole("link", { name: "Entrar como Empresa" })).toHaveAttribute("href", "/acesso?perfil=empresa");
+        expect(screen.getByRole("link", { name: "Voltar para Empresa" })).toHaveAttribute("href", "/empresa/login");
+        expect(screen.getByRole("link", { name: "Entrar como Empresa" })).toHaveAttribute("href", "/empresa/login");
     });
 
     it("authenticates and redirects to the agency dashboard", async () => {

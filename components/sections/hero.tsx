@@ -24,16 +24,16 @@ export function HeroSection() {
                     </p>
 
                     <div className="flex flex-col items-center justify-center space-y-4 sm:flex-row sm:space-x-4 sm:space-y-0 relative z-10 mb-6">
-                        <Link href="/avaliacao" className="inline-flex h-14 items-center justify-center rounded-md bg-primary px-8 text-base font-bold text-primary-foreground shadow transition-colors hover:bg-primary/90 w-full sm:w-auto">
-                            Fazer Avaliação Técnica (2 min)
+                        <Link href="/empresa/login" className="inline-flex h-14 items-center justify-center rounded-md bg-primary px-8 text-base font-bold text-primary-foreground shadow transition-colors hover:bg-primary/90 w-full sm:w-auto">
+                            Entrar na Empresa
                         </Link>
-                        <Link href="/solucoes" className="inline-flex h-14 items-center justify-center rounded-md border border-border/50 bg-background/50 backdrop-blur-sm px-8 text-base font-medium hover:bg-muted transition-colors w-full sm:w-auto">
-                            Ver Arquitetura
+                        <Link href="/avaliacao" className="inline-flex h-14 items-center justify-center rounded-md border border-border/50 bg-background/50 backdrop-blur-sm px-8 text-base font-medium hover:bg-muted transition-colors w-full sm:w-auto">
+                            Fazer Avaliação Técnica (2 min)
                         </Link>
                     </div>
 
                     <p className="text-sm text-muted-foreground max-w-md mx-auto">
-                        Análise de arquitetura, viabilidade operacional e oportunidades reais de aplicação de IA.
+                        Acesse sua conta e siga direto para o sistema sem precisar entender a separação interna.
                     </p>
                 </div>
             </div>

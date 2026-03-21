@@ -1,10 +1,7 @@
 import Link from "next/link";
 import { ThemeToggle } from "./theme-toggle";
-import { resolveDefaultRedirect } from "@/lib/auth/resolveDefaultRedirect";
 
-export async function Navbar() {
-    const accessHref = await resolveDefaultRedirect();
-
+export function Navbar() {
     return (
         <header className="sticky top-0 z-50 w-full border-b border-border/40 bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
             <div className="container flex h-16 max-w-screen-2xl items-center justify-between px-4 md:px-8 mx-auto">
@@ -19,10 +16,10 @@ export async function Navbar() {
                 <div className="flex items-center space-x-4">
                     <ThemeToggle />
                     <Link
-                        href={accessHref}
+                        href="/empresa/login"
                         className="inline-flex h-10 items-center justify-center rounded-md border border-primary/30 bg-primary/10 px-4 text-sm font-semibold text-primary transition-colors hover:bg-primary/15"
                     >
-                        Entrar no Império
+                        Entrar na Empresa
                     </Link>
                     <Link href="/avaliacao" className="inline-flex h-10 items-center justify-center rounded-md bg-primary px-6 text-sm font-medium text-primary-foreground shadow transition-colors hover:bg-primary/90 hidden md:inline-flex">
                         Fazer Avaliação

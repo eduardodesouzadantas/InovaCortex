@@ -38,7 +38,7 @@ export function EmpireCTA({ redirectPath }: EmpireCTAProps) {
 
                         <div className="flex flex-col items-start translate-y-[1px]">
                             <span className="text-[10px] uppercase tracking-[0.2em] text-[#d4af37]/70 font-bold mb-0.5">Acesso Restrito</span>
-                            <span className="text-sm font-black text-white tracking-tight">Entrar no Império</span>
+                            <span className="text-sm font-black text-white tracking-tight">Entrar na Empresa</span>
                         </div>
 
                         <div className="ml-2 w-6 h-6 rounded-full bg-white/10 flex items-center justify-center group-hover:bg-[#d4af37] transition-colors">

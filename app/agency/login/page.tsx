@@ -104,13 +104,13 @@ export default function AgencyLoginPage() {
 
                     <div className="mt-8 flex flex-wrap gap-3">
                         <Link
-                            href="/acesso"
+                            href="/empresa/login"
                             className="inline-flex h-11 items-center justify-center rounded-2xl border border-white/10 px-4 text-sm font-semibold text-slate-200 transition hover:border-white/20 hover:text-white"
                         >
-                            Voltar para Acesso
+                            Voltar para Empresa
                         </Link>
                         <Link
-                            href="/acesso?perfil=empresa"
+                            href="/empresa/login"
                             className="inline-flex h-11 items-center justify-center rounded-2xl border border-amber-400/20 bg-amber-400/10 px-4 text-sm font-semibold text-amber-100 transition hover:bg-amber-400/15"
                         >
                             Entrar como Empresa
@@ -174,8 +174,7 @@ export default function AgencyLoginPage() {
                             Acesso restrito
                         </div>
                         <p className="mt-2 leading-6">
-                            Use este fluxo apenas para contas da agência. A empresa entra pela rota de acesso
-                            principal em <strong>/acesso</strong>.
+                            Use este fluxo apenas para contas da agência. A empresa entra diretamente em <strong>/empresa/login</strong>.
                         </p>
                     </div>
                 </section>

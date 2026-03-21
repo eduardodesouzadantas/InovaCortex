@@ -3,13 +3,13 @@ import { hasAuthScope } from "./rbac";
 
 /**
  * Resolves the default redirect path based on user session and role.
- * Used for the "Empire CTA" and other general entry points.
+ * Used for general entry points and legacy redirects.
  */
 export async function resolveDefaultRedirect(): Promise<string> {
     const auth = await getAuthContext();
 
     if (!auth.isAuthenticated || !auth.role || !auth.organizationSlug) {
-        return "/acesso";
+        return "/empresa/login";
     }
 
     const { role, organizationSlug } = auth;

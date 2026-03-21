@@ -1,5 +1,5 @@
 import { redirect } from "next/navigation";
 
 export default function AdminLoginPage() {
-    redirect("/acesso?perfil=empresa");
+    redirect("/empresa/login");
 }

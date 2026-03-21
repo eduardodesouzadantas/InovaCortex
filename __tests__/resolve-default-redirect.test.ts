@@ -13,11 +13,11 @@ import { getAuthContext } from "../lib/auth/session";
 const getAuthContextMock = getAuthContext as jest.MockedFunction<typeof getAuthContext>;
 
 describe("resolveDefaultRedirect", () => {
-    it("routes unauthenticated users to the access hub", async () => {
+    it("routes unauthenticated users to the company login", async () => {
         getAuthContextMock.mockResolvedValueOnce({
             isAuthenticated: false,
         } as never);
 
-        await expect(resolveDefaultRedirect()).resolves.toBe("/acesso");
+        await expect(resolveDefaultRedirect()).resolves.toBe("/empresa/login");
     });
 });
