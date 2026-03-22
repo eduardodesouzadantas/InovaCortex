@@ -16,7 +16,8 @@ jest.mock("next/navigation", () => ({
     }),
 }));
 
-import AgencyLoginPage from "../app/agency/login/page";
+import AgencyLoginPage from "../app/(agency-public)/agency/login/page";
+import { agencyLoginNavigation } from "../app/(agency-public)/agency/login/page";
 
 describe("AgencyLoginPage", () => {
     beforeEach(() => {
@@ -28,13 +29,13 @@ describe("AgencyLoginPage", () => {
     it("renders the agency login surface and access links", () => {
         render(<AgencyLoginPage />);
 
-        expect(screen.getByText("Acesso da Agência")).toBeInTheDocument();
-        expect(screen.getByRole("link", { name: "Voltar para Empresa" })).toHaveAttribute("href", "/empresa/login");
-        expect(screen.getByRole("link", { name: "Entrar como Empresa" })).toHaveAttribute("href", "/empresa/login");
+        expect(screen.getByText("Acesso da Agencia")).toBeInTheDocument();
+        expect(screen.getByRole("link", { name: "Acesso da empresa" })).toHaveAttribute("href", "/empresa/login");
     });
 
     it("authenticates and redirects to the agency dashboard", async () => {
         const user = userEvent.setup();
+        const goToDashboard = jest.spyOn(agencyLoginNavigation, "goToDashboard").mockImplementation(() => undefined);
         (global.fetch as jest.Mock).mockResolvedValueOnce({
             ok: true,
             json: async () => ({
@@ -49,8 +50,8 @@ describe("AgencyLoginPage", () => {
         await user.click(screen.getByRole("button", { name: "Autenticar" }));
 
         await waitFor(() => {
-            expect(push).toHaveBeenCalledWith("/agency/dashboard");
+            expect(goToDashboard).toHaveBeenCalled();
         });
-        expect(refresh).toHaveBeenCalled();
+        goToDashboard.mockRestore();
     });
 });

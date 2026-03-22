@@ -10,6 +10,7 @@ import bcrypt from "bcryptjs";
 import { SignJWT, jwtVerify } from "jose";
 import type { NextRequest } from "next/server";
 import { logWarn } from "@/lib/core/observability/logger";
+import { allowInsecureSessionFallback, isProductionEnv } from "@/lib/env";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -23,19 +24,30 @@ let jwtSecretWarningLogged = false;
 
 function getJwtSecret(): Uint8Array {
     const key = process.env.APP_ENCRYPTION_KEY;
-    if (!key) {
+    const normalizedKey = typeof key === "string" ? key.trim() : "";
+
+    if (normalizedKey) {
+        return new TextEncoder().encode(normalizedKey);
+    }
+
+    if (allowInsecureSessionFallback()) {
         if (!jwtSecretWarningLogged) {
             jwtSecretWarningLogged = true;
             logWarn("env_warning_missing", {
                 module: "auth-session",
                 message: "[ENV WARNING] APP_ENCRYPTION_KEY not configured",
                 key: "APP_ENCRYPTION_KEY",
-                mode: "degraded",
+                mode: "local_fallback",
             });
         }
         return new TextEncoder().encode(FALLBACK_JWT_SECRET);
     }
-    return new TextEncoder().encode(key);
+
+    if (isProductionEnv()) {
+        throw new Error("APP_ENCRYPTION_KEY is required in production");
+    }
+
+    throw new Error("APP_ENCRYPTION_KEY is required. Set ALLOW_INSECURE_SESSION_FALLBACK=true only for local development.");
 }
 
 // ─── Types ────────────────────────────────────────────────────────────────────

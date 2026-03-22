@@ -1,109 +1,57 @@
 import Link from "next/link";
-import { Building2, LogOut } from "lucide-react";
+import { headers } from "next/headers";
+import { redirect } from "next/navigation";
 
-export default function AgencyLayout({
+import { SurfaceShell } from "@/components/navigation/surface-shell";
+import { isAgencyLoginPath } from "@/lib/navigation/surface-shell";
+import { getAuthContext } from "@/lib/auth/session";
+import { buildAgencySurfaceDefinition } from "@/lib/front/surface-architecture";
+
+export default async function AgencyLayout({
     children,
 }: {
     children: React.ReactNode;
 }) {
+    const headersList = await headers();
+    const pathname =
+        headersList.get("x-invoke-path") ||
+        headersList.get("x-matched-path") ||
+        headersList.get("next-url") ||
+        "";
+    if (isAgencyLoginPath(pathname)) {
+        return <>{children}</>;
+    }
+
+    const auth = await getAuthContext();
+    if (!auth.isAuthenticated || auth.authScope !== "agency") {
+        redirect("/agency/login");
+    }
+
+    const surface = buildAgencySurfaceDefinition();
+
     return (
-        <div className="min-h-screen bg-slate-950 text-slate-100">
-            <header className="border-b border-slate-800/80 bg-slate-900/70 backdrop-blur">
-                <div className="mx-auto flex h-14 w-full max-w-7xl items-center justify-between px-4 md:px-6">
-                    <div className="flex items-center gap-2 text-sm font-semibold tracking-wide">
-                        <Building2 className="h-4 w-4 text-cyan-400" />
-                        <span>InovaCortex Agency</span>
-                    </div>
-
-                    <div className="flex items-center gap-3">
-                        <Link
-                            href="/agency/dashboard"
-                            className="text-xs text-slate-300 transition-colors hover:text-white"
-                        >
-                            Dashboard
-                        </Link>
-                        <Link
-                            href="/agency/cockpit"
-                            className="text-xs text-slate-300 transition-colors hover:text-white"
-                        >
-                            Cockpit
-                        </Link>
-                        <Link
-                            href="/agency/settings"
-                            className="text-xs text-slate-300 transition-colors hover:text-white"
-                        >
-                            Configuracoes
-                        </Link>
-                        <Link
-                            href="/agency/commercial/leads"
-                            className="text-xs text-slate-300 transition-colors hover:text-white"
-                        >
-                            Commercial Leads
-                        </Link>
-                        <Link
-                            href="/agency/commercial/workspaces"
-                            className="text-xs text-slate-300 transition-colors hover:text-white"
-                        >
-                            Workspaces
-                        </Link>
-                        <Link
-                            href="/agency/content"
-                            className="text-xs text-slate-300 transition-colors hover:text-white"
-                        >
-                            Content
-                        </Link>
-                        <Link
-                            href="/agency/authority"
-                            className="text-xs text-slate-300 transition-colors hover:text-white"
-                        >
-                            Authority
-                        </Link>
-                        <Link
-                            href="/agency/monitoring"
-                            className="text-xs text-slate-300 transition-colors hover:text-white"
-                        >
-                            Monitoring
-                        </Link>
-                        <Link
-                            href="/agency/costs"
-                            className="text-xs text-slate-300 transition-colors hover:text-white"
-                        >
-                            Costs
-                        </Link>
-                        <Link
-                            href="/agency/executive"
-                            className="text-xs text-slate-300 transition-colors hover:text-white"
-                        >
-                            Executive
-                        </Link>
-                        <Link
-                            href="/agency/command-center"
-                            className="text-xs text-slate-300 transition-colors hover:text-white"
-                        >
-                            Command
-                        </Link>
-                        <Link
-                            href="/agency/executive-pack"
-                            className="text-xs text-slate-300 transition-colors hover:text-white"
-                        >
-                            Exec Pack
-                        </Link>
-                        <form action="/api/agency/auth/logout" method="post">
-                            <button
-                                type="submit"
-                                className="inline-flex items-center gap-1 rounded-md border border-slate-700 px-2 py-1 text-xs text-slate-300 transition-colors hover:border-slate-600 hover:text-white"
-                            >
-                                <LogOut className="h-3.5 w-3.5" />
-                                Sair
-                            </button>
-                        </form>
-                    </div>
+        <SurfaceShell
+            surface={surface}
+            contextBadge={`Agency scope · ${auth.role ?? "restricted"} · ${auth.organizationSlug ?? "inovacortex"}`}
+            logoutAction="/api/agency/auth/logout"
+            topActions={(
+                <div className="flex items-center gap-2">
+                    <Link
+                        href="/agency/dashboard"
+                        className="rounded-2xl border border-white/10 bg-white/[0.04] px-4 py-2 text-sm font-medium text-slate-100 transition hover:bg-white/[0.08]"
+                    >
+                        Agency Home
+                    </Link>
+                    <Link
+                        href="/agency/command-center"
+                        className="rounded-2xl border border-white/10 bg-white/[0.04] px-4 py-2 text-sm font-medium text-slate-100 transition hover:bg-white/[0.08]"
+                    >
+                        Command Center
+                    </Link>
                 </div>
-            </header>
-
-            <main className="mx-auto w-full max-w-7xl px-4 py-8 md:px-6">
-                {children}
-            </main>
-        </div>
+            )}
+        >
+            {children}
+        </SurfaceShell>
     );
 }

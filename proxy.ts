@@ -1,5 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getAuthContextFromRequest, type AuthContext } from "@/lib/auth/session";
+import { hasRole } from "@/lib/auth/rbac";
+import { evaluateExecutiveSurfaceAccess } from "@/lib/executive/access";
+import { isShelllessPath } from "@/lib/navigation/surface-shell";
 
 function isTruthyFlag(value: string | undefined): boolean {
     if (!value) return false;
@@ -41,8 +44,17 @@ function extractTenantAdminSlug(pathname: string): string | null {
     return match?.[1] ?? null;
 }
 
+function extractTenantExecutiveSlug(pathname: string): string | null {
+    const match = pathname.match(/^\/org\/([^/]+)\/executive(?:\/|$)/);
+    return match?.[1] ?? null;
+}
+
 function isTenantAdminLoginPage(pathname: string): boolean {
     return /^\/org\/[^/]+\/admin\/login(?:\/)?$/.test(pathname);
+}
+
+function isTenantExecutiveLoginPage(pathname: string): boolean {
+    return /^\/org\/[^/]+\/executive\/login(?:\/)?$/.test(pathname);
 }
 
 function isLegacyBuilderTenantPage(pathname: string): boolean {
@@ -51,6 +63,14 @@ function isLegacyBuilderTenantPage(pathname: string): boolean {
 
 function isAgencyApiRoute(pathname: string): boolean {
     return pathname.startsWith("/api/agency/") || pathname.startsWith("/api/admin/");
+}
+
+function isSystemApiRoute(pathname: string): boolean {
+    return pathname.startsWith("/api/system/");
+}
+
+function isPublicWebhookRoute(pathname: string): boolean {
+    return pathname.startsWith("/api/webhooks/");
 }
 
 function isAgencyPublicApi(pathname: string): boolean {
@@ -73,8 +93,8 @@ function redirectTo(path: string, request: NextRequest): NextResponse {
     return NextResponse.redirect(new URL(path, request.url));
 }
 
-function apiError(status: 401 | 403, error: "UNAUTHENTICATED" | "FORBIDDEN"): NextResponse {
-    return NextResponse.json({ error }, { status });
+function apiError(status: 401 | 403, error: "UNAUTHORIZED" | "FORBIDDEN"): NextResponse {
+    return NextResponse.json({ success: false, error }, { status });
 }
 
 function redirectToTenantHome(auth: AuthContext, request: NextRequest, fallbackPath: string): NextResponse {
@@ -84,13 +104,18 @@ function redirectToTenantHome(auth: AuthContext, request: NextRequest, fallbackP
     return redirectTo(fallbackPath, request);
 }
 
-export async function middleware(request: NextRequest) {
+export async function proxy(request: NextRequest) {
     const { pathname } = request.nextUrl;
-    const proceed = NextResponse.next();
-
-    if (!isLayerGuardsEnabled()) {
-        return applySecurityHeaders(proceed, pathname);
+    const requestHeaders = new Headers(request.headers);
+    if (isShelllessPath(pathname)) {
+        requestHeaders.set("x-inovacortex-shellless", "1");
     }
+
+    const proceed = NextResponse.next({
+        request: {
+            headers: requestHeaders,
+        },
+    });
 
     let cachedAuth: AuthContext | null = null;
     const getAuth = async () => {
@@ -100,6 +125,10 @@ export async function middleware(request: NextRequest) {
     };
 
     if (isAgencyPageRoute(pathname)) {
+        if (!isLayerGuardsEnabled()) {
+            return applySecurityHeaders(proceed, pathname);
+        }
+
         if (isAgencyPublicPage(pathname)) {
             return applySecurityHeaders(proceed, pathname);
         }
@@ -117,6 +146,10 @@ export async function middleware(request: NextRequest) {
 
     const tenantAdminSlug = extractTenantAdminSlug(pathname);
     if (tenantAdminSlug) {
+        if (!isLayerGuardsEnabled()) {
+            return applySecurityHeaders(proceed, pathname);
+        }
+
         if (isTenantAdminLoginPage(pathname)) {
             return applySecurityHeaders(proceed, pathname);
         }
@@ -142,14 +175,42 @@ export async function middleware(request: NextRequest) {
         return applySecurityHeaders(proceed, pathname);
     }
 
+    const tenantExecutiveSlug = extractTenantExecutiveSlug(pathname);
+    if (tenantExecutiveSlug) {
+        if (!isLayerGuardsEnabled()) {
+            return applySecurityHeaders(proceed, pathname);
+        }
+
+        if (isTenantExecutiveLoginPage(pathname)) {
+            return applySecurityHeaders(proceed, pathname);
+        }
+
+        const auth = await getAuth();
+        const access = evaluateExecutiveSurfaceAccess(auth, tenantExecutiveSlug);
+
+        if (access.state === "redirect") {
+            return applySecurityHeaders(redirectTo(access.redirectTo, request), pathname);
+        }
+
+        if (access.state === "forbidden") {
+            return applySecurityHeaders(proceed, pathname);
+        }
+
+        return applySecurityHeaders(proceed, pathname);
+    }
+
     if (isAgencyApiRoute(pathname)) {
+        if (!isLayerGuardsEnabled()) {
+            return applySecurityHeaders(proceed, pathname);
+        }
+
         if (isAgencyPublicApi(pathname)) {
             return applySecurityHeaders(proceed, pathname);
         }
 
         const auth = await getAuth();
         if (!auth.isAuthenticated) {
-            return applySecurityHeaders(apiError(401, "UNAUTHENTICATED"), pathname);
+            return applySecurityHeaders(apiError(401, "UNAUTHORIZED"), pathname);
         }
         if (auth.authScope !== "agency") {
             return applySecurityHeaders(apiError(403, "FORBIDDEN"), pathname);
@@ -158,11 +219,26 @@ export async function middleware(request: NextRequest) {
         return applySecurityHeaders(proceed, pathname);
     }
 
+    if (isPublicWebhookRoute(pathname)) {
+        return applySecurityHeaders(proceed, pathname);
+    }
+
+    if (isSystemApiRoute(pathname)) {
+        return applySecurityHeaders(proceed, pathname);
+    }
+
     const tenantApiSlug = extractTenantApiSlug(pathname);
     if (tenantApiSlug) {
+        if (!isLayerGuardsEnabled()) {
+            return applySecurityHeaders(proceed, pathname);
+        }
+
         const auth = await getAuth();
         if (!auth.isAuthenticated) {
-            return applySecurityHeaders(apiError(401, "UNAUTHENTICATED"), pathname);
+            return applySecurityHeaders(apiError(401, "UNAUTHORIZED"), pathname);
+        }
+        if (auth.authScope === "agency" && auth.role && hasRole(auth.role, "viewer")) {
+            return applySecurityHeaders(proceed, pathname);
         }
         if (
             isLegacyBuilderTenantApi(pathname)
@@ -178,6 +254,10 @@ export async function middleware(request: NextRequest) {
             return applySecurityHeaders(apiError(403, "FORBIDDEN"), pathname);
         }
 
+        return applySecurityHeaders(proceed, pathname);
+    }
+
+    if (!isLayerGuardsEnabled()) {
         return applySecurityHeaders(proceed, pathname);
     }
 

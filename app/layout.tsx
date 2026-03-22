@@ -5,6 +5,7 @@ import "./globals.css";
 import { ThemeProvider } from "@/components/theme-provider";
 import { Navbar } from "@/components/navbar";
 import { Footer } from "@/components/footer";
+import { isShelllessPath } from "@/lib/navigation/surface-shell";
 
 const inter = Inter({
   variable: "--font-inter",
@@ -35,10 +36,6 @@ export const metadata: Metadata = {
 
 import { WhatsAppButton } from "@/components/whatsapp-button";
 
-function isAgencyPath(pathname: string): boolean {
-  return pathname === "/agency" || pathname.startsWith("/agency/");
-}
-
 export default async function RootLayout({
   children,
 }: Readonly<{
@@ -50,8 +47,8 @@ export default async function RootLayout({
     headersList.get("x-matched-path") ||
     headersList.get("next-url") ||
     "";
-
-  const agencyLayer = isAgencyPath(invokePath);
+  const shelllessHeader = headersList.get("x-inovacortex-shellless");
+  const shelllessLayer = shelllessHeader === "1" || isShelllessPath(invokePath);
 
   return (
     <html lang="pt-BR" suppressHydrationWarning>
@@ -64,7 +61,7 @@ export default async function RootLayout({
           enableSystem
           disableTransitionOnChange
         >
-          {agencyLayer ? (
+          {shelllessLayer ? (
             <main className="min-h-screen">{children}</main>
           ) : (
             <>

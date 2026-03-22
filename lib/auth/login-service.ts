@@ -1,4 +1,6 @@
 import { NextResponse } from "next/server";
+
+import { apiError } from "@/lib/http/api-response";
 import { prisma } from "@/lib/prisma";
 import {
     getAgencyOrgSlug,
@@ -10,6 +12,7 @@ import {
     verifyPassword,
 } from "@/lib/auth/session";
 import { logger } from "@/lib/logger";
+import { isDatabaseUnavailableError } from "@/lib/system/db-check";
 
 const VALID_SESSION_ROLES: ReadonlySet<SessionPayload["role"]> = new Set([
     "owner",
@@ -44,8 +47,11 @@ function isAgencyOrganization(orgSlug: string): boolean {
     return orgSlug.trim().toLowerCase() === getAgencyOrgSlug();
 }
 
-function unauthorizedResponse() {
-    return NextResponse.json({ error: "Credenciais inválidas" }, { status: 401 });
+function unauthorizedResponse(request: Request) {
+    return apiError(request, {
+        message: "INVALID_CREDENTIALS",
+        code: "UNAUTHORIZED",
+    }, { status: 401 });
 }
 
 function resolveAdminBootstrapCredentials(): AdminBootstrapCredentials | null {
@@ -111,7 +117,6 @@ async function ensureAgencyAdminBootstrap(email: string, options: LoginOptions):
             email: bootstrap.email,
         });
     } catch (error) {
-        // Ignore unique race condition if another request created the same user concurrently.
         const code =
             typeof error === "object" && error !== null && "code" in error
                 ? String((error as { code?: unknown }).code ?? "")
@@ -133,19 +138,33 @@ export async function loginWithPassword(
         const password = body.password ?? "";
 
         if (!email || !password) {
-            return NextResponse.json({ error: "Email e senha obrigatórios" }, { status: 400 });
+            return apiError(request, {
+                message: "EMAIL_AND_PASSWORD_REQUIRED",
+                code: "BAD_REQUEST",
+            }, { status: 400 });
         }
 
         await ensureAgencyAdminBootstrap(email, options);
 
         const user = await prisma.user.findUnique({
             where: { email },
-            include: { organization: { select: { id: true, slug: true } } },
+            select: {
+                id: true,
+                passwordHash: true,
+                role: true,
+                active: true,
+                organizationId: true,
+                organization: {
+                    select: {
+                        slug: true,
+                    },
+                },
+            },
         });
 
         if (!user) {
             logger.warn("Login attempt for unknown email", { email, endpoint: options.endpoint });
-            return unauthorizedResponse();
+            return unauthorizedResponse(request);
         }
 
         const role = normalizeSessionRole(String(user.role));
@@ -155,13 +174,22 @@ export async function loginWithPassword(
                 role: user.role,
                 endpoint: options.endpoint,
             });
-            return NextResponse.json({ error: "ERRO_ROLE_INVALIDA: " + user.role }, { status: 500 });
+            return apiError(request, {
+                message: "INVALID_USER_ROLE",
+                code: "INTERNAL_ERROR",
+                details: { role: user.role },
+            }, { status: 500 });
+        }
+
+        if (!user.active) {
+            logger.warn("Login forbidden: inactive user", { email, userId: user.id, endpoint: options.endpoint });
+            return unauthorizedResponse(request);
         }
 
         const validPassword = await verifyPassword(password, user.passwordHash);
         if (!validPassword) {
             logger.warn("Login failed: bad password", { email, userId: user.id, endpoint: options.endpoint });
-            return unauthorizedResponse();
+            return unauthorizedResponse(request);
         }
 
         if (options.requireScope === "agency" && !isAgencyOrganization(user.organization.slug)) {
@@ -170,7 +198,10 @@ export async function loginWithPassword(
                 orgSlug: user.organization.slug,
                 endpoint: options.endpoint,
             });
-            return NextResponse.json({ error: "Acesso restrito ao contexto da agência" }, { status: 403 });
+            return apiError(request, {
+                message: "FORBIDDEN",
+                code: "FORBIDDEN",
+            }, { status: 403 });
         }
 
         const sessionPayload: SessionPayload = {
@@ -199,7 +230,21 @@ export async function loginWithPassword(
             authScope,
         });
     } catch (error) {
+        if (isDatabaseUnavailableError(error)) {
+            logger.error("Login database unavailable", {
+                endpoint: options.endpoint,
+                error: error instanceof Error ? error.message : String(error),
+            });
+            return apiError(request, {
+                message: "DATABASE_UNAVAILABLE",
+                code: "SERVICE_UNAVAILABLE",
+            }, { status: 503 });
+        }
+
         logger.error("Login error", { error: String(error), endpoint: options.endpoint });
-        return NextResponse.json({ error: "ERRO_REAL_DO_SISTEMA: " + String(error) }, { status: 500 });
+        return apiError(request, {
+            message: "INTERNAL_ERROR",
+            code: "INTERNAL_ERROR",
+        }, { status: 500 });
     }
 }

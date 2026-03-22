@@ -18,8 +18,14 @@ export async function getCurrentUser() {
     const auth = await getCurrentAuthContext();
     if (!auth.isAuthenticated || !auth.userId) return null;
 
-    return await prisma.user.findUnique({
+    const user = await prisma.user.findUnique({
         where: { id: auth.userId },
         include: { organization: true },
     }).catch(() => null);
+
+    if (!user || !user.active) {
+        return null;
+    }
+
+    return user;
 }
