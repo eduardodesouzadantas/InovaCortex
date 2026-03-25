@@ -106,25 +106,34 @@ function getDefaultRateLimitStore(): RateLimitStore {
     return defaultStore;
 }
 
-function buildRateLimitKey(input: {
+function buildRateLimitPrefix(input: {
     scope: AuthScope;
     endpoint?: LoginEndpoint;
     organizationId?: string;
-    bucket: RateLimitBucket;
-    identifierHash: string;
-    ip: string;
 }): string {
-    const prefix = input.scope === "login"
+    return input.scope === "login"
         ? `auth:login:${input.endpoint ?? "auth"}`
         : input.scope === "password_reset"
             ? `auth:password-reset:${input.organizationId ?? "unknown-org"}`
             : `auth:invite:${input.organizationId ?? "unknown-org"}`;
+}
 
-    const suffix = input.bucket === "identifier"
-        ? input.identifierHash
-        : hashValue(input.ip);
+function buildIdentifierBucketKey(input: {
+    scope: AuthScope;
+    endpoint?: LoginEndpoint;
+    organizationId?: string;
+    identifierHash: string;
+}): string {
+    return `${buildRateLimitPrefix(input)}:identifier:${input.identifierHash}`;
+}
 
-    return `${prefix}:${input.bucket}:${suffix}:${input.ip}`;
+function buildIpBucketKey(input: {
+    scope: AuthScope;
+    endpoint?: LoginEndpoint;
+    organizationId?: string;
+    ip: string;
+}): string {
+    return `${buildRateLimitPrefix(input)}:ip:${hashValue(input.ip)}`;
 }
 
 function getLimitConfig(scope: AuthScope): { identifierLimit: number; ipLimit: number; windowMs: number } {
@@ -159,25 +168,21 @@ async function consumeAuthRateLimit(input: ConsumeAuthRateLimitInput): Promise<A
     const store = getDefaultRateLimitStore();
 
     const identifierBucket = await store.consume({
-        key: buildRateLimitKey({
+        key: buildIdentifierBucketKey({
             scope: input.scope,
             endpoint: input.endpoint,
             organizationId: input.organizationId,
-            bucket: "identifier",
             identifierHash,
-            ip,
         }),
         windowMs: config.windowMs,
         now,
     });
 
     const ipBucket = await store.consume({
-        key: buildRateLimitKey({
+        key: buildIpBucketKey({
             scope: input.scope,
             endpoint: input.endpoint,
             organizationId: input.organizationId,
-            bucket: "ip",
-            identifierHash,
             ip,
         }),
         windowMs: config.windowMs,

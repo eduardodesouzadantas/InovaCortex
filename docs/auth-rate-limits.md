@@ -19,6 +19,8 @@
 
 - Login keys are isolated by endpoint so `/api/auth/login`, `/api/agency/auth/login`, and the legacy admin adapter do not share counters.
 - Password reset and invite keys are isolated by organization to preserve tenant separation.
+- The identifier bucket depends on the normalized subject hash only.
+- The IP bucket depends on the resolved client IP only.
 - Subject values and IP buckets are hashed before storage; logs keep only the minimal context needed for debugging.
 - Client IP resolution prefers proxy-aware headers and falls back to `unknown-ip` only when no valid IP header is available.
 

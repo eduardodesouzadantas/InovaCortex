@@ -25,12 +25,14 @@ describe("auth login rate limit", () => {
         expect(resolveAuthLoginClientIp(buildRequest({ forwarded: 'for="[2001:db8::1]";proto=https' }))).toBe("2001:db8::1");
     });
 
-    it("blocks repeated attempts for the same identifier", async () => {
-        const request = buildRequest({ "x-forwarded-for": "203.0.113.10" });
+    it("blocks repeated attempts for the same identifier even when IPs change", async () => {
+        const requestForAttempt = (attempt: number) => buildRequest({
+            "x-forwarded-for": `203.0.113.${10 + attempt}`,
+        });
 
         for (let attempt = 0; attempt < AUTH_LOGIN_IDENTIFIER_LIMIT; attempt += 1) {
             const decision = await consumeAuthLoginRateLimit({
-                request,
+                request: requestForAttempt(attempt),
                 endpoint: "auth",
                 identifier: "admin@acme.com",
                 now: 0,
@@ -40,7 +42,7 @@ describe("auth login rate limit", () => {
         }
 
         const blocked = await consumeAuthLoginRateLimit({
-            request,
+            request: requestForAttempt(AUTH_LOGIN_IDENTIFIER_LIMIT),
             endpoint: "auth",
             identifier: "admin@acme.com",
             now: 0,

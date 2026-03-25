@@ -295,12 +295,23 @@ export async function loginWithPassword(
             }, { status: 403 });
         }
 
-        await prisma.user.update({
-            where: { id: user.id },
-            data: {
-                lastAccessAt: new Date(),
-            },
-        });
+        try {
+            await prisma.user.update({
+                where: { id: user.id },
+                data: {
+                    lastAccessAt: new Date(),
+                },
+            });
+        } catch (error) {
+            logger.warn("Login lastAccessAt update failed; continuing", {
+                operation: "auth_login_last_access_update",
+                result: "ignored",
+                endpoint: options.endpoint,
+                userId: user.id,
+                organizationId: user.organizationId,
+                error: error instanceof Error ? error.message : String(error),
+            });
+        }
 
         const sessionPayload: SessionPayload = {
             userId: user.id,

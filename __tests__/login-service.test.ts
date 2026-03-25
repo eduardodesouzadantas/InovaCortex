@@ -321,4 +321,67 @@ describe("login-service", () => {
             orgSlug: "tenant-a",
         }));
     });
+
+    test("keeps login successful when lastAccessAt update fails", async () => {
+        verifyPasswordMock.mockResolvedValue(true);
+        resolveAuthContextMock.mockReturnValue({
+            isAuthenticated: true,
+            authScope: "tenant",
+            organizationId: "org-1",
+            organizationSlug: "tenant-a",
+            userId: "user-1",
+            role: "admin",
+            session: {
+                userId: "user-1",
+                orgId: "org-1",
+                orgSlug: "tenant-a",
+                role: "admin",
+            },
+        });
+        mockPrisma.user.findUnique.mockResolvedValue({
+            id: "user-1",
+            name: "Admin",
+            passwordHash: "hashed-password",
+            role: "admin",
+            active: true,
+            organizationId: "org-1",
+            lastAccessAt: null,
+            organization: {
+                slug: "tenant-a",
+            },
+        });
+        mockPrisma.user.update.mockRejectedValueOnce(new Error("lastAccessAt write failed"));
+
+        const response = await loginWithPassword(
+            new Request("http://localhost/api/auth/login", {
+                method: "POST",
+                body: JSON.stringify({
+                    email: "admin@acme.com",
+                    password: "secret",
+                }),
+                headers: {
+                    "content-type": "application/json",
+                },
+            }),
+            { endpoint: "auth" },
+        );
+
+        expect(response.status).toBe(200);
+        expect(mockLogger.warn).toHaveBeenCalledWith(
+            "Login lastAccessAt update failed; continuing",
+            expect.objectContaining({
+                operation: "auth_login_last_access_update",
+                result: "ignored",
+                endpoint: "auth",
+                userId: "user-1",
+                organizationId: "org-1",
+                error: "lastAccessAt write failed",
+            }),
+        );
+        expect(setSessionCookieMock).toHaveBeenCalledWith(expect.objectContaining({
+            userId: "user-1",
+            orgId: "org-1",
+            orgSlug: "tenant-a",
+        }));
+    });
 });
