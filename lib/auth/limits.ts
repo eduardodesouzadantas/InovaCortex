@@ -22,7 +22,7 @@ function startOfCurrentMonth(): Date {
  * Throws LimitExceededError if the org has reached its monthly assessment limit.
  */
 export async function checkAssessmentLimit(orgId: string, maxPerMonth: number): Promise<void> {
-    const count = await (prisma as any).assessment.count({
+    const count = await prisma.assessment.count({
         where: {
             organizationId: orgId,
             createdAt: { gte: startOfCurrentMonth() }
@@ -38,7 +38,7 @@ export async function checkAssessmentLimit(orgId: string, maxPerMonth: number): 
  * Throws LimitExceededError if the org has reached its user limit.
  */
 export async function checkUserLimit(orgId: string, maxUsers: number): Promise<void> {
-    const count = await (prisma as any).user.count({
+    const count = await prisma.user.count({
         where: { organizationId: orgId }
     });
 
@@ -52,10 +52,10 @@ export async function checkUserLimit(orgId: string, maxUsers: number): Promise<v
  */
 export async function getOrgUsage(orgId: string) {
     const [assessmentsThisMonth, totalUsers] = await Promise.all([
-        (prisma as any).assessment.count({
+        prisma.assessment.count({
             where: { organizationId: orgId, createdAt: { gte: startOfCurrentMonth() } }
         }),
-        (prisma as any).user.count({ where: { organizationId: orgId } }),
+        prisma.user.count({ where: { organizationId: orgId } }),
     ]);
     return { assessmentsThisMonth, totalUsers };
 }

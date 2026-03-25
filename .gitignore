@@ -18,3 +18,27 @@ dev.db
 next-env.d.ts
 /lib/generated/prisma
 /coverage
+
+# local operational artifacts
+.agent/
+artifacts/
+browser-evidence-*.png
+browser-report-*.json
+db-fix*.ts
+db-inspect.ts
+detailed_test_results.json
+dev-server.err
+login-body.json
+logs_dump.json
+out.json
+security_audit.json
+test_output.json
+test_results.json
+tmp-*.js
+
+.vercel
+.vercel.production.env
+.env*.local
+
+.vercel
+.env*.local

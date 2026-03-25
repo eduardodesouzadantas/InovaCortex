@@ -11,8 +11,13 @@ import {
     type SessionPayload,
     verifyPassword,
 } from "@/lib/auth/session";
+import {
+    consumeAuthLoginRateLimit,
+    type AuthLoginRateLimitDecision,
+} from "@/lib/auth/login-rate-limit";
 import { logger } from "@/lib/logger";
 import { isDatabaseUnavailableError } from "@/lib/system/db-check";
+import { trackEvent } from "@/app/services/identityEvents/identityEvent.service";
 
 const VALID_SESSION_ROLES: ReadonlySet<SessionPayload["role"]> = new Set([
     "owner",
@@ -36,6 +41,7 @@ interface LoginOptions {
 interface AdminBootstrapCredentials {
     email: string;
     password: string;
+    name?: string;
 }
 
 function normalizeSessionRole(role: string): SessionPayload["role"] | null {
@@ -54,15 +60,51 @@ function unauthorizedResponse(request: Request) {
     }, { status: 401 });
 }
 
+function rateLimitedResponse(
+    request: Request,
+    options: LoginOptions,
+    rateLimit: AuthLoginRateLimitDecision,
+) {
+    logger.warn("Login rate limit exceeded", {
+        operation: "auth_login_rate_limit",
+        result: "blocked",
+        endpoint: options.endpoint,
+        bucket: rateLimit.exceededBucket,
+        identifierHash: rateLimit.identifierHash,
+        retryAfterSeconds: rateLimit.retryAfterSeconds,
+    });
+
+    void trackEvent({
+        type: "LOGIN_FAILED",
+        metadata: {
+            endpoint: options.endpoint,
+            reason: "rate_limited",
+            bucket: rateLimit.exceededBucket,
+            identifierHash: rateLimit.identifierHash,
+        },
+    });
+
+    return apiError(request, {
+        message: "TOO_MANY_ATTEMPTS",
+        code: "TOO_MANY_REQUESTS",
+    }, {
+        status: 429,
+        headers: {
+            "Retry-After": String(rateLimit.retryAfterSeconds),
+        },
+    });
+}
+
 function resolveAdminBootstrapCredentials(): AdminBootstrapCredentials | null {
     const email = (process.env.ADMIN_EMAIL ?? process.env.INITIAL_ADMIN_EMAIL ?? "").trim().toLowerCase();
     const password = (process.env.ADMIN_PASSWORD ?? process.env.INITIAL_ADMIN_PASSWORD ?? "").trim();
+    const name = (process.env.ADMIN_NAME ?? process.env.INITIAL_ADMIN_NAME ?? "").trim();
 
     if (!email || !password) {
         return null;
     }
 
-    return { email, password };
+    return { email, password, name: name || undefined };
 }
 
 async function ensureAgencyAdminBootstrap(email: string, options: LoginOptions): Promise<void> {
@@ -105,6 +147,7 @@ async function ensureAgencyAdminBootstrap(email: string, options: LoginOptions):
         await prisma.user.create({
             data: {
                 email: bootstrap.email,
+                name: bootstrap.name ?? null,
                 passwordHash,
                 role: "admin",
                 organizationId: organization.id,
@@ -131,17 +174,56 @@ async function ensureAgencyAdminBootstrap(email: string, options: LoginOptions):
 export async function loginWithPassword(
     request: Request,
     options: LoginOptions,
-): Promise<NextResponse<LoginSuccessPayload | { error: string }>> {
+): Promise<NextResponse> {
     try {
-        const body = (await request.json()) as { email?: string; password?: string };
+        let body: { email?: string; password?: string };
+        try {
+            body = (await request.json()) as { email?: string; password?: string };
+        } catch {
+            const rateLimit = await consumeAuthLoginRateLimit({
+                request,
+                endpoint: options.endpoint,
+                identifier: "invalid_payload",
+            });
+
+            if (!rateLimit.allowed) {
+                return rateLimitedResponse(request, options, rateLimit);
+            }
+
+            return apiError(request, {
+                message: "INVALID_PAYLOAD",
+                code: "BAD_REQUEST",
+            }, { status: 400 });
+        }
+
         const email = body.email?.toLowerCase().trim() ?? "";
         const password = body.password ?? "";
 
         if (!email || !password) {
+            const rateLimit = await consumeAuthLoginRateLimit({
+                request,
+                endpoint: options.endpoint,
+                identifier: "invalid_payload",
+            });
+
+            if (!rateLimit.allowed) {
+                return rateLimitedResponse(request, options, rateLimit);
+            }
+
             return apiError(request, {
                 message: "EMAIL_AND_PASSWORD_REQUIRED",
                 code: "BAD_REQUEST",
             }, { status: 400 });
+        }
+
+        const rateLimit = await consumeAuthLoginRateLimit({
+            request,
+            endpoint: options.endpoint,
+            identifier: email,
+        });
+
+        if (!rateLimit.allowed) {
+            return rateLimitedResponse(request, options, rateLimit);
         }
 
         await ensureAgencyAdminBootstrap(email, options);
@@ -150,10 +232,12 @@ export async function loginWithPassword(
             where: { email },
             select: {
                 id: true,
+                name: true,
                 passwordHash: true,
                 role: true,
                 active: true,
                 organizationId: true,
+                lastAccessAt: true,
                 organization: {
                     select: {
                         slug: true,
@@ -164,6 +248,7 @@ export async function loginWithPassword(
 
         if (!user) {
             logger.warn("Login attempt for unknown email", { email, endpoint: options.endpoint });
+            await trackEvent({ type: "LOGIN_FAILED", metadata: { email, reason: "unknown_email", endpoint: options.endpoint } });
             return unauthorizedResponse(request);
         }
 
@@ -183,12 +268,17 @@ export async function loginWithPassword(
 
         if (!user.active) {
             logger.warn("Login forbidden: inactive user", { email, userId: user.id, endpoint: options.endpoint });
-            return unauthorizedResponse(request);
+            await trackEvent({ type: "LOGIN_FAILED", userId: user.id, organizationId: user.organizationId, metadata: { email, reason: "inactive_user", endpoint: options.endpoint } });
+            return apiError(request, {
+                message: "INACTIVE_USER",
+                code: "FORBIDDEN",
+            }, { status: 403 });
         }
 
         const validPassword = await verifyPassword(password, user.passwordHash);
         if (!validPassword) {
             logger.warn("Login failed: bad password", { email, userId: user.id, endpoint: options.endpoint });
+            await trackEvent({ type: "LOGIN_FAILED", userId: user.id, organizationId: user.organizationId, metadata: { email, reason: "bad_password", endpoint: options.endpoint } });
             return unauthorizedResponse(request);
         }
 
@@ -198,11 +288,19 @@ export async function loginWithPassword(
                 orgSlug: user.organization.slug,
                 endpoint: options.endpoint,
             });
+            await trackEvent({ type: "LOGIN_FAILED", userId: user.id, organizationId: user.organizationId, metadata: { email, reason: "wrong_scope", endpoint: options.endpoint } });
             return apiError(request, {
                 message: "FORBIDDEN",
                 code: "FORBIDDEN",
             }, { status: 403 });
         }
+
+        await prisma.user.update({
+            where: { id: user.id },
+            data: {
+                lastAccessAt: new Date(),
+            },
+        });
 
         const sessionPayload: SessionPayload = {
             userId: user.id,
@@ -221,6 +319,13 @@ export async function loginWithPassword(
             role,
             authScope,
             endpoint: options.endpoint,
+        });
+
+        await trackEvent({
+            type: "LOGIN_SUCCESS",
+            userId: user.id,
+            organizationId: user.organizationId,
+            metadata: { email, role, endpoint: options.endpoint, authScope },
         });
 
         return NextResponse.json({
