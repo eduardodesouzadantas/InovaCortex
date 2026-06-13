@@ -1,10 +1,11 @@
+import { withApiLogging } from "@/lib/logger";
 import { NextRequest, NextResponse } from "next/server";
 import { requireAdminApiAccess } from "@/lib/auth/admin-api-guard";
 import { getRoiHandler, updateRoiHandler } from "@/lib/agency/commercial/leads";
 
 export const runtime = "nodejs";
 
-export async function GET(
+async function GETHandler(
     request: NextRequest,
     { params }: { params: Promise<{ id: string }> },
 ) {
@@ -20,7 +21,7 @@ export async function GET(
     return getRoiHandler(id);
 }
 
-export async function PATCH(
+async function PATCHHandler(
     request: NextRequest,
     { params }: { params: Promise<{ id: string }> },
 ) {
@@ -35,3 +36,6 @@ export async function PATCH(
     const { id } = await params;
     return updateRoiHandler(request, id);
 }
+
+export const GET = withApiLogging("/api/agency/commercial/leads/[id]/roi", "GET", GETHandler);
+export const PATCH = withApiLogging("/api/agency/commercial/leads/[id]/roi", "PATCH", PATCHHandler);

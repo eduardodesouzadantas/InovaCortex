@@ -1,3 +1,4 @@
+import { withApiLogging } from "@/lib/logger";
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 
@@ -10,7 +11,7 @@ export const runtime = "nodejs";
  *
  * Body: { body: string, taskId?: string }
  */
-export async function POST(
+async function POSTHandler(
     request: NextRequest,
     { params }: { params: Promise<{ id: string }> }
 ) {
@@ -39,7 +40,7 @@ export async function POST(
     // Validate task belongs to this workspace if provided
     if (taskId) {
         const task = await (prisma as any).implementationTask.findFirst({
-            where: { id: taskId, workspaceId },
+            where: { id: taskId, workspaceId, organizationId: workspace.organizationId },
         });
         if (!task) {
             return NextResponse.json({ error: "Tarefa não encontrada neste workspace." }, { status: 404 });
@@ -71,3 +72,5 @@ export async function POST(
 
     return NextResponse.json({ success: true, commentId: comment.id });
 }
+
+export const POST = withApiLogging("/api/public/workspace/[id]/comment", "POST", POSTHandler);

@@ -3,39 +3,95 @@ generator client {
 }
 
 datasource db {
-  provider = "postgresql"
-  url      = env("DATABASE_URL")
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
   directUrl = env("DIRECT_URL")
 }
 
 model Organization {
-  id                     String                 @id @default(uuid())
+  id                     String                     @id @default(uuid())
   name                   String
-  slug                   String                 @unique
-  plan                   String                 @default("free")
-  maxAssessmentsPerMonth Int                    @default(50)
-  maxUsers               Int                    @default(5)
-  industry               String                 @default("Services")
+  slug                   String                     @unique
+  plan                   String                     @default("free")
+  maxAssessmentsPerMonth Int                        @default(50)
+  maxUsers               Int                        @default(5)
+  industry               String                     @default("Services")
   stripeCustomerId       String?
   stripeSubscriptionId   String?
-  subscriptionStatus     String                 @default("none")
+  subscriptionStatus     String                     @default("none")
   currentPeriodStart     DateTime?
   currentPeriodEnd       DateTime?
-  createdAt              DateTime               @default(now())
-  updatedAt              DateTime               @default(now())
+  createdAt              DateTime                   @default(now())
+  updatedAt              DateTime                   @default(now())
   assessments            Assessment[]
   commissionRules        CommissionRule[]
   contacts               Contact[]
   usageSnapshots         MonthlyUsageSnapshot[]
   salesReps              SalesRep[]
+  agencyMemberships      AgencyMembership[]
+  organizationAccesses   OrganizationAccess[]
+  implementationTasks    ImplementationTask[]
+  integrationItems       IntegrationChecklistItem[]
+  userInvites            UserInvite[]
+  leadAssignments        LeadAssignment[]
+  pipelines              Pipeline[]
+  deals                  Deal[]
+  activities             Activity[]
+  offerAssets            OfferAsset[]
   usageEvents            UsageEvent[]
   users                  User[]
+  warRoomSnapshots       WarRoomSnapshot[]
   whatsappCampaigns      WhatsAppCampaign[]
+  whatsappChannels       WhatsAppChannel[]
   whatsappConversations  WhatsAppConversation[]
+  whatsappMessages       WhatsAppMessage[]
   whatsappTemplates      WhatsAppTemplate[]
   whatsappUsers          WhatsAppUser[]
+  emailIntegrations      EmailIntegration[]
+  publicApiKeys          PublicApiKey[]
+  publicApiIdempotencyRecords PublicApiIdempotencyRecord[]
+  emailThreads           EmailThread[]
+  emailMessages          EmailMessage[]
+  onboardingStatus       OnboardingStatus?
+  executivePulseActions  ExecutivePulseAction[]
+  webhookEndpoints       WebhookEndpoint[]
+  webhookDeliveries      WebhookDelivery[]
 
   @@map("organizations")
+}
+
+model AgencyMembership {
+  id                   String               @id @default(uuid())
+  userId               String
+  organizationId       String
+  role                 String               @default("member")
+  active               Boolean              @default(true)
+  createdAt            DateTime             @default(now())
+  updatedAt            DateTime             @updatedAt
+  organizationAccesses OrganizationAccess[]
+  user                 User                 @relation(fields: [userId], references: [id], onDelete: Cascade)
+  organization         Organization         @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, organizationId])
+  @@index([organizationId])
+  @@index([userId, active])
+  @@map("agency_memberships")
+}
+
+model OrganizationAccess {
+  id                 String           @id @default(uuid())
+  agencyMembershipId String
+  organizationId     String
+  active             Boolean          @default(true)
+  createdAt          DateTime         @default(now())
+  updatedAt          DateTime         @updatedAt
+  agencyMembership   AgencyMembership @relation(fields: [agencyMembershipId], references: [id], onDelete: Cascade)
+  organization       Organization     @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@unique([agencyMembershipId, organizationId])
+  @@index([organizationId])
+  @@index([agencyMembershipId, active])
+  @@map("organization_accesses")
 }
 
 model UsageEvent {
@@ -65,6 +121,7 @@ model MonthlyUsageSnapshot {
   organization       Organization @relation(fields: [organizationId], references: [id])
 
   @@unique([organizationId, month])
+  @@index([organizationId, updatedAt])
   @@map("monthly_usage_snapshots")
 }
 
@@ -72,23 +129,62 @@ model User {
   id                            String                 @id @default(uuid())
   email                         String                 @unique
   passwordHash                  String
+  name                          String?
   role                          String                 @default("admin")
   organizationId                String
+  active                        Boolean                @default(true)
+  lastAccessAt                  DateTime?
   createdAt                     DateTime               @default(now())
   updatedAt                     DateTime               @updatedAt
+  agencyMemberships             AgencyMembership[]
   managedAssignments            LeadAssignment[]
   salesReps                     SalesRep[]
+  passwordResetTokens           UserPasswordResetToken[]
   organization                  Organization           @relation(fields: [organizationId], references: [id])
   assignedWhatsAppConversations WhatsAppConversation[]
+  assignedEmailThreads          EmailThread[]
 
   @@index([organizationId])
   @@map("users")
+}
+
+model UserPasswordResetToken {
+  id         String   @id @default(uuid())
+  userId     String
+  tokenHash  String   @unique
+  expiresAt  DateTime
+  createdAt  DateTime @default(now())
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, expiresAt])
+  @@map("user_password_reset_tokens")
+}
+
+model UserInvite {
+  id              String     @id @default(uuid())
+  organizationId  String
+  email           String
+  role            String     @default("viewer")
+  tokenHash       String     @unique
+  expiresAt       DateTime
+  acceptedAt      DateTime?
+  revokedAt       DateTime?
+  createdByUserId String
+  createdAt       DateTime   @default(now())
+  organization    Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId, email])
+  @@index([organizationId, expiresAt])
+  @@index([createdByUserId])
+  @@map("user_invites")
 }
 
 model Assessment {
   id                  String             @id @default(uuid())
   createdAt           DateTime           @default(now())
   organizationId      String             @default("default-org-id")
+  contactId           String?
+  dealId              String?
   name                String
   email               String
   company             String
@@ -111,6 +207,8 @@ model Assessment {
   internalNotes       String?
   artifactReport      ArtifactReport?
   organization        Organization       @relation(fields: [organizationId], references: [id])
+  contact             Contact?           @relation(fields: [contactId], references: [id], onDelete: SetNull)
+  deal                Deal?              @relation(fields: [dealId], references: [id], onDelete: SetNull)
   auditEvents         AuditEvent[]
   assignments         LeadAssignment[]
   messageLogs         MessageLog[]
@@ -119,6 +217,8 @@ model Assessment {
   roiProjection       RoiProjection?
 
   @@index([organizationId, status])
+  @@index([contactId])
+  @@index([dealId])
   @@index([email])
   @@map("assessments")
 }
@@ -126,6 +226,7 @@ model Assessment {
 model Proposal {
   id               String     @id @default(uuid())
   assessmentId     String
+  dealId           String?
   version          Int        @default(1)
   publicSlug       String     @unique
   organizationId   String     @default("default-org-id")
@@ -138,8 +239,10 @@ model Proposal {
   createdAt        DateTime   @default(now())
   updatedAt        DateTime   @updatedAt
   assessment       Assessment @relation(fields: [assessmentId], references: [id])
+  deal             Deal?      @relation(fields: [dealId], references: [id], onDelete: SetNull)
 
   @@index([assessmentId])
+  @@index([dealId])
   @@index([organizationId, status])
   @@map("proposals")
 }
@@ -202,6 +305,25 @@ model AuditEvent {
   @@map("audit_events")
 }
 
+model ExecutivePulseAction {
+  id               String       @id @default(uuid())
+  organizationId   String
+  pulseKey         String
+  status           String       @default("open")
+  linkedEntityType String?
+  linkedEntityId   String?
+  lastActionAt     DateTime?
+  lastActionBy     String?
+  createdAt        DateTime     @default(now())
+  updatedAt        DateTime     @updatedAt
+  organization     Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@unique([organizationId, pulseKey])
+  @@index([organizationId, status, updatedAt])
+  @@index([organizationId, linkedEntityType, linkedEntityId])
+  @@map("executive_pulse_actions")
+}
+
 model PreSalesArtifact {
   id                  String     @id @default(uuid())
   assessmentId        String
@@ -257,6 +379,7 @@ model AlertEvent {
 
   @@index([organizationId, createdAt])
   @@index([organizationId, type, resolved])
+  @@index([organizationId, resolved, createdAt])
   @@map("alert_events")
 }
 
@@ -285,36 +408,60 @@ model ClientWorkspace {
 }
 
 model ImplementationTask {
-  id          String             @id @default(uuid())
-  workspaceId String
-  title       String
-  description String
-  ownerRole   String             @default("admin")
-  status      String             @default("todo")
-  phase       String             @default("setup")
-  orderIndex  Int                @default(0)
-  dueAt       DateTime?
-  doneAt      DateTime?
-  createdAt   DateTime           @default(now())
-  workspace   ClientWorkspace    @relation(fields: [workspaceId], references: [id])
-  comments    WorkspaceComment[]
+  id             String             @id @default(uuid())
+  organizationId String
+  workspaceId    String
+  title          String
+  description    String
+  ownerRole      String             @default("admin")
+  status         String             @default("todo")
+  phase          String             @default("setup")
+  orderIndex     Int                @default(0)
+  dueAt          DateTime?
+  doneAt         DateTime?
+  createdAt      DateTime           @default(now())
+  workspace      ClientWorkspace    @relation(fields: [workspaceId], references: [id])
+  organization   Organization       @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  comments       WorkspaceComment[]
 
+  @@index([organizationId])
   @@index([workspaceId, status])
   @@map("implementation_tasks")
 }
 
 model IntegrationChecklistItem {
-  id          String          @id @default(uuid())
-  workspaceId String
-  system      String
-  item        String
-  status      String          @default("pending")
-  notes       String?
-  createdAt   DateTime        @default(now())
-  workspace   ClientWorkspace @relation(fields: [workspaceId], references: [id])
+  id             String          @id @default(uuid())
+  organizationId String
+  workspaceId    String
+  system         String
+  item           String
+  status         String          @default("pending")
+  notes          String?
+  createdAt      DateTime        @default(now())
+  workspace      ClientWorkspace @relation(fields: [workspaceId], references: [id])
+  organization   Organization    @relation(fields: [organizationId], references: [id], onDelete: Cascade)
 
+  @@index([organizationId])
   @@index([workspaceId, system])
   @@map("integration_checklist_items")
+}
+
+model OnboardingStatus {
+  id                   String       @id @default(uuid())
+  organizationId       String       @unique
+  /// not_started | in_progress | completed
+  status               String       @default("not_started")
+  emailConnectedAt     DateTime?
+  pipelineConfiguredAt DateTime?
+  firstContactAt       DateTime?
+  firstDealAt          DateTime?
+  completedAt          DateTime?
+  createdAt            DateTime     @default(now())
+  updatedAt            DateTime     @updatedAt
+  organization         Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId, status])
+  @@map("onboarding_statuses")
 }
 
 model WorkspaceUpload {
@@ -559,7 +706,10 @@ model MeetingSession {
   proposalDraftLink   ProposalDraftLink?
 
   @@index([organizationId, status])
+  @@index([organizationId, startAt])
   @@index([leadEmail])
+  @@index([assessmentId, startAt])
+  @@index([organizationId, updatedAt])
   @@index([organizationId, adjustedProbability])
   @@index([organizationId, expectedRevenue])
   @@index([organizationId, urgencyLevel])
@@ -606,6 +756,7 @@ model MeetingPerformance {
   session        MeetingSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
 
   @@index([organizationId, sessionId])
+  @@index([organizationId, outcome, createdAt])
   @@map("meeting_performances")
 }
 
@@ -906,6 +1057,69 @@ model DealPacket {
   @@map("deal_packets")
 }
 
+model Pipeline {
+  id             String          @id @default(cuid())
+  organizationId String
+  name           String
+  position       Int
+  createdAt      DateTime        @default(now())
+  organization   Organization    @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  stages         PipelineStage[]
+
+  @@index([organizationId])
+  @@map("pipelines")
+}
+
+model PipelineStage {
+  id          String   @id @default(cuid())
+  pipelineId  String
+  name        String
+  position    Int
+  probability Int?
+  pipeline    Pipeline @relation(fields: [pipelineId], references: [id], onDelete: Cascade)
+  deals       Deal[]
+
+  @@index([pipelineId])
+  @@map("pipeline_stages")
+}
+
+model Deal {
+  id             String        @id @default(cuid())
+  organizationId String
+  contactId      String
+  stageId        String
+  value          Float?
+  status         String
+  createdAt      DateTime      @default(now())
+  organization   Organization  @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  contact        Contact       @relation(fields: [contactId], references: [id], onDelete: Cascade)
+  stage          PipelineStage @relation(fields: [stageId], references: [id], onDelete: Restrict)
+  activities     Activity[]
+  assessments    Assessment[]
+  proposals      Proposal[]
+  emailThreads   EmailThread[]
+
+  @@index([organizationId])
+  @@index([contactId])
+  @@index([stageId])
+  @@map("deals")
+}
+
+model Activity {
+  id             String       @id @default(cuid())
+  organizationId String
+  dealId         String
+  type           String
+  note           String?
+  createdAt      DateTime     @default(now())
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  deal           Deal         @relation(fields: [dealId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId])
+  @@index([dealId])
+  @@map("activities")
+}
+
 /// Engagement signal for a DealPacket (views, CTAs, replies, no-responses).
 model DealSignal {
   id           String      @id @default(uuid())
@@ -1016,6 +1230,7 @@ model ProfitLeak {
   updatedAt          DateTime @updatedAt
 
   @@index([orgId, kind, severity, status, createdAt])
+  @@index([orgId, status, updatedAt])
   @@map("profit_leaks")
 }
 
@@ -1059,6 +1274,24 @@ model AppSetting {
   updatedAt DateTime @default(now())
 
   @@map("app_settings")
+}
+
+model WarRoomSnapshot {
+  id                  String       @id @default(uuid())
+  organizationId      String
+  revenueToday        Float        @default(0)
+  revenueThisMonth    Float        @default(0)
+  pipelineValue       Float        @default(0)
+  activeDeals         Int          @default(0)
+  conversionRate      Float        @default(0)
+  campaignPerformance String
+  riskAlerts          String
+  profitLeakSignals   String
+  createdAt           DateTime     @default(now())
+  organization        Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId, createdAt])
+  @@map("war_room_snapshots")
 }
 
 /// Canonical reusable blueprint for a build type.
@@ -1137,6 +1370,7 @@ model SystemEvent {
 
   @@index([organizationId, createdAt])
   @@index([organizationId, type])
+  @@index([organizationId, severity, createdAt])
   @@map("system_events")
 }
 
@@ -1341,25 +1575,30 @@ model SalesRep {
   targets              SalesTarget[]
 
   @@index([organizationId])
+  @@index([organizationId, active, role])
   @@map("sales_reps")
 }
 
 /// Assignment of a lead (Assessment) to a SalesRep
 model LeadAssignment {
-  id               String     @id @default(uuid())
+  id               String       @id @default(uuid())
+  organizationId   String
   assessmentId     String
   salesRepId       String
   /// User who made the assignment (null = auto-assigned)
   assignedByUserId String?
   /// active | reassigned | closed
-  status           String     @default("active")
-  assignedAt       DateTime   @default(now())
-  updatedAt        DateTime   @updatedAt
-  assignedBy       User?      @relation(fields: [assignedByUserId], references: [id])
-  salesRep         SalesRep   @relation(fields: [salesRepId], references: [id], onDelete: Cascade)
-  assessment       Assessment @relation(fields: [assessmentId], references: [id], onDelete: Cascade)
+  status           String       @default("active")
+  assignedAt       DateTime     @default(now())
+  updatedAt        DateTime     @updatedAt
+  assignedBy       User?        @relation(fields: [assignedByUserId], references: [id])
+  organization     Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  salesRep         SalesRep     @relation(fields: [salesRepId], references: [id], onDelete: Cascade)
+  assessment       Assessment   @relation(fields: [assessmentId], references: [id], onDelete: Cascade)
 
+  @@index([organizationId])
   @@index([salesRepId])
+  @@index([salesRepId, status])
   @@index([assessmentId])
   @@map("lead_assignments")
 }
@@ -1422,6 +1661,7 @@ model Contact {
   phoneNumberE164    String
   wa_id              String?
   name               String?
+  email              String?
   tags               String                 @default("[]")
   lifecycle          String                 @default("lead")
   lastMessageAt      DateTime?
@@ -1433,11 +1673,17 @@ model Contact {
   createdAt          DateTime               @default(now())
   updatedAt          DateTime               @updatedAt
   organization       Organization           @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  assessments        Assessment[]
   campaignSends      WhatsAppCampaignSend[]
   conversations      WhatsAppConversation[]
+  deals              Deal[]
+  messages           WhatsAppMessage[]
   optIn              WhatsAppOptIn?
+  emailThreads       EmailThread[]
+  emailMessages      EmailMessage[]
 
   @@unique([organizationId, phoneNumberE164])
+  @@index([organizationId, lastMessageAt])
   @@map("contacts")
 }
 
@@ -1460,12 +1706,30 @@ model WhatsAppConversation {
 
   @@unique([organizationId, contactId])
   @@index([organizationId, status, slaDueAt])
+  @@index([organizationId, assignedUserId])
+  @@index([organizationId, status, assignedUserId])
+  @@index([organizationId, status, lastMessageAt])
   @@map("whatsapp_conversations")
+}
+
+model WhatsAppChannel {
+  id                String       @id @default(cuid())
+  organizationId    String
+  phoneNumberId     String       @unique
+  businessAccountId String
+  createdAt         DateTime     @default(now())
+  updatedAt         DateTime     @updatedAt
+  organization      Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId])
+  @@map("whatsapp_channels")
 }
 
 model WhatsAppMessage {
   id                String               @id @default(uuid())
+  organizationId    String
   conversationId    String
+  contactId         String
   messageId         String?              @unique
   direction         String
   type              String               @default("text")
@@ -1480,8 +1744,12 @@ model WhatsAppMessage {
   failedAt          DateTime?
   metaStatusPayload String?
   createdAt         DateTime             @default(now())
+  contact           Contact              @relation(fields: [contactId], references: [id], onDelete: Cascade)
   conversation      WhatsAppConversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  organization      Organization         @relation(fields: [organizationId], references: [id], onDelete: Cascade)
 
+  @@index([organizationId])
+  @@index([contactId])
   @@index([conversationId, createdAt])
   @@map("whatsapp_messages")
 }
@@ -1512,6 +1780,7 @@ model WhatsAppTemplate {
   organization   Organization       @relation(fields: [organizationId], references: [id], onDelete: Cascade)
 
   @@unique([organizationId, name, language])
+  @@index([organizationId, name])
   @@map("whatsapp_templates")
 }
 
@@ -1532,6 +1801,7 @@ model WhatsAppCampaign {
   organization   Organization           @relation(fields: [organizationId], references: [id], onDelete: Cascade)
 
   @@index([organizationId, status])
+  @@index([organizationId, createdAt])
   @@map("whatsapp_campaigns")
 }
 
@@ -1546,6 +1816,8 @@ model WhatsAppCampaignSend {
   campaign   WhatsAppCampaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
 
   @@unique([campaignId, contactId])
+  @@index([campaignId, status])
+  @@index([campaignId, status, sentAt])
   @@map("whatsapp_campaign_sends")
 }
 
@@ -1605,14 +1877,17 @@ model Offer {
 }
 
 model OfferAsset {
-  id        String   @id @default(uuid())
-  offerId   String
+  id             String       @id @default(uuid())
+  organizationId String
+  offerId        String
   /// one_pager_html | proposal_template | contract_template | checkout_config
-  type      String
-  content   String
-  createdAt DateTime @default(now())
-  offer     Offer    @relation(fields: [offerId], references: [id], onDelete: Cascade)
+  type           String
+  content        String
+  createdAt      DateTime     @default(now())
+  offer          Offer        @relation(fields: [offerId], references: [id], onDelete: Cascade)
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
 
+  @@index([organizationId])
   @@index([offerId, type])
   @@map("offer_assets")
 }
@@ -1627,6 +1902,7 @@ model SalesAssignment {
   salesRep       SalesRep @relation(fields: [salesRepId], references: [id], onDelete: Cascade)
 
   @@unique([organizationId, entityType, entityId])
+  @@index([organizationId, salesRepId, entityType])
   @@map("sales_assignments")
 }
 
@@ -1641,6 +1917,7 @@ model PerformanceSnapshot {
   salesRep       SalesRep? @relation(fields: [salesRepId], references: [id])
 
   @@index([organizationId, window])
+  @@index([organizationId, window, createdAt])
   @@map("performance_snapshots")
 }
 
@@ -1697,4 +1974,185 @@ model PlaybookApproval {
 
   @@index([organizationId, status])
   @@map("playbook_approvals")
+}
+
+model EmailIntegration {
+  id                    String    @id @default(uuid())
+  organizationId        String    @unique
+  provider              String    @default("google")
+  status                String    @default("disconnected")
+  ownerEmail            String
+  accessTokenEncrypted  String?
+  refreshTokenEncrypted String?
+  expiryAt              DateTime?
+  lastSyncAt            DateTime?
+  lastSyncStatus        String?
+  lastSyncDurationMs    Int?
+  lastError             String?
+  createdAt             DateTime  @default(now())
+  updatedAt             DateTime  @updatedAt
+  organization          Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@map("email_integrations")
+}
+
+model PublicApiKey {
+  id             String       @id @default(uuid())
+  organizationId String
+  name           String
+  keyPrefix      String
+  keyHash        String       @unique
+  lastUsedAt     DateTime?
+  revokedAt      DateTime?
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId, revokedAt])
+  @@index([organizationId, createdAt])
+  @@map("public_api_keys")
+}
+
+model PublicApiIdempotencyRecord {
+  id                 String       @id @default(uuid())
+  organizationId     String
+  routeKey           String
+  idempotencyKey     String
+  requestHash        String
+  status             String       @default("processing")
+  responseStatus     Int?
+  responseBodyJson   String?
+  errorCode          String?
+  errorMessage       String?
+  errorDetailsJson   String?
+  createdAt          DateTime     @default(now())
+  updatedAt          DateTime     @updatedAt
+  completedAt        DateTime?
+  organization      Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@unique([organizationId, routeKey, idempotencyKey])
+  @@index([organizationId, routeKey, createdAt])
+  @@map("public_api_idempotency_records")
+}
+
+model EmailThread {
+  id                 String            @id @default(uuid())
+  organizationId     String
+  contactId          String?
+  assignedUserId     String?
+  dealId             String?
+  externalThreadId   String            
+  subject            String?
+  status             String            @default("open")
+  slaDueAt           DateTime?
+  lastMessageAt      DateTime?
+  lastMessagePreview String?
+  unreadCount        Int               @default(0)
+  createdAt          DateTime          @default(now())
+  updatedAt          DateTime          @updatedAt
+  user               User?             @relation(fields: [assignedUserId], references: [id])
+  contact            Contact?          @relation(fields: [contactId], references: [id], onDelete: SetNull)
+  deal               Deal?             @relation(fields: [dealId], references: [id], onDelete: SetNull)
+  organization       Organization      @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  messages           EmailMessage[]
+
+  @@unique([organizationId, externalThreadId])
+  @@index([organizationId, status, slaDueAt])
+  @@index([organizationId, assignedUserId])
+  @@index([organizationId, dealId])
+  @@index([organizationId, status, lastMessageAt])
+  @@map("email_threads")
+}
+
+model EmailMessage {
+  id                String       @id @default(uuid())
+  organizationId    String
+  threadId          String
+  contactId         String?
+  externalMessageId String       @unique
+  direction         String       
+  fromAddress       String
+  toAddress         String
+  subject           String?
+  bodyText          String?
+  bodyHtml          String?
+  status            String       @default("sent")
+  sentAt            DateTime?
+  receivedAt        DateTime?
+  createdAt         DateTime     @default(now())
+  contact           Contact?     @relation(fields: [contactId], references: [id], onDelete: SetNull)
+  thread            EmailThread  @relation(fields: [threadId], references: [id], onDelete: Cascade)
+  organization      Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId])
+  @@index([contactId])
+  @@index([threadId, createdAt])
+  @@map("email_messages")
+}
+
+model WebhookEndpoint {
+  id                   String             @id @default(uuid())
+  organizationId       String
+  url                  String
+  secretEncrypted      String
+  isActive             Boolean            @default(true)
+  subscribedEvents     String[]
+  lastDeliveryAt       DateTime?
+  lastDeliveryStatus    String?
+  lastDeliveryError    String?
+  deliveryAttemptCount  Int                @default(0)
+  createdAt            DateTime           @default(now())
+  updatedAt            DateTime           @updatedAt
+  organization         Organization       @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  deliveries           WebhookDelivery[]
+
+  @@index([organizationId, isActive])
+  @@index([organizationId, createdAt])
+  @@map("webhook_endpoints")
+}
+
+model WebhookDelivery {
+  id                String           @id @default(uuid())
+  organizationId    String
+  webhookEndpointId String
+  eventId           String
+  eventType         String
+  payloadJson       String
+  attemptCount      Int              @default(0)
+  status            String           @default("pending")
+  responseCode      Int?
+  errorSummary      String?
+  lastAttemptAt     DateTime?
+  deliveredAt       DateTime?
+  createdAt         DateTime         @default(now())
+  updatedAt         DateTime         @updatedAt
+  organization      Organization     @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  webhookEndpoint   WebhookEndpoint  @relation(fields: [webhookEndpointId], references: [id], onDelete: Cascade)
+
+  @@unique([webhookEndpointId, eventId])
+  @@index([organizationId, eventType, createdAt])
+  @@index([webhookEndpointId, createdAt])
+  @@map("webhook_deliveries")
+}
+
+enum IdentityEventType {
+  LOGIN_SUCCESS
+  LOGIN_FAILED
+  INVITE_CREATED
+  INVITE_ACCEPTED
+  PASSWORD_RESET_REQUESTED
+  PASSWORD_RESET_COMPLETED
+}
+
+model IdentityEvent {
+  id             String            @id @default(uuid())
+  type           IdentityEventType
+  userId         String?
+  organizationId String?
+  metadata       String? // JSON stored as string, per Prisma conventions here
+  createdAt      DateTime          @default(now())
+
+  @@index([userId])
+  @@index([organizationId])
+  @@map("identity_events")
 }

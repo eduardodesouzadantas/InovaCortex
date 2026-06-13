@@ -1,39 +1,39 @@
+import { withApiLogging } from "@/lib/logger";
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { requireOrgContext } from "@/lib/auth/org-context";
+import { resolveTenantRouteError, tenantNotFoundResponse } from "@/lib/auth/tenant-route";
 import { getRepStats } from "@/lib/sales/stats-engine";
 import { getRepAssignments } from "@/lib/sales/assignment-engine";
+import { buildPaginationMeta, parsePagination } from "@/lib/http/pagination";
 
-function authErrorResponse(e: unknown) {
-    const message = e instanceof Error ? e.message : "";
-    if (message === "UNAUTHENTICATED") return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    if (message === "ORG_NOT_FOUND") return NextResponse.json({ error: "Organization not found" }, { status: 404 });
-    if (typeof message === "string" && message.startsWith("FORBIDDEN")) {
-        return NextResponse.json({ error: "Forbidden" }, { status: 403 });
-    }
-    return null;
-}
-
-export async function GET(req: Request, { params }: { params: Promise<{ slug: string; repId: string }> }) {
+async function GETHandler(req: Request, { params }: { params: Promise<{ slug: string; repId: string }> }) {
     try {
         const p = await params;
         const { orgId } = await requireOrgContext(p.slug);
+        const pagination = parsePagination(new URL(req.url).searchParams, { defaultLimit: 25, maxLimit: 100 });
 
-        const rep = await (prisma as any).salesRep.findFirst({
+        const rep = await prisma.salesRep.findFirst({
             where: { id: p.repId, organizationId: orgId },
             select: { id: true }
         });
-        if (!rep) return NextResponse.json({ error: "Rep not found" }, { status: 404 });
+        if (!rep) return tenantNotFoundResponse("Rep not found");
 
         const month = new URL(req.url).searchParams.get("month") || new Date().toISOString().slice(0, 7);
         const [stats, assignments] = await Promise.all([
             getRepStats(p.repId, month),
-            getRepAssignments(p.repId)
+            getRepAssignments(orgId, p.repId)
         ]);
 
-        if (!stats) return NextResponse.json({ error: "Rep not found" }, { status: 404 });
-        return NextResponse.json({ stats, assignments });
+        if (!stats) return tenantNotFoundResponse("Rep not found");
+        return NextResponse.json({
+            stats,
+            assignments: assignments.slice(pagination.skip, pagination.skip + pagination.limit),
+            pagination: buildPaginationMeta({ ...pagination, total: assignments.length }),
+        });
     } catch (e: unknown) {
-        return authErrorResponse(e) ?? NextResponse.json({ error: "Internal Error" }, { status: 500 });
+        return resolveTenantRouteError(e, "Failed to load rep detail");
     }
 }
+
+export const GET = withApiLogging("/api/org/[slug]/sales/rep/[repId]/detail", "GET", GETHandler);

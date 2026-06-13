@@ -1,5 +1,6 @@
 import { prisma } from "@/lib/prisma";
 import { logger } from "@/lib/logger";
+import { profileStep } from "@/lib/request-profiler";
 
 export interface StrategyKPIs {
     proposalAcceptanceRate: number;
@@ -26,50 +27,74 @@ export interface Recommendation {
     roiCents?: number;
 }
 
+export interface StrategyAnalysisResult {
+    kpis: StrategyKPIs;
+    benchmarks: any;
+    bottlenecks: Bottleneck[];
+    recommendations: Recommendation[];
+}
+
+const STRATEGY_ANALYSIS_CACHE_TTL_MS = 60_000;
+const strategyAnalysisCache = new Map<string, { expiresAt: number; value: StrategyAnalysisResult }>();
+
 /**
  * Computes core KPIs for an organization within a given time window.
  */
 export async function computeCoreKPIs(orgId: string, days: number = 30): Promise<StrategyKPIs> {
     const startDate = new Date(Date.now() - (days * 24 * 60 * 60 * 1000));
 
-    // 1. Proposal Metrics
-    const proposals = await prisma.proposal.findMany({
-        where: { organizationId: orgId, createdAt: { gte: startDate } },
-        select: { status: true, pricingEstimate: true, createdAt: true, updatedAt: true }
-    });
+    const [proposalCount, acceptedProposals, meetingEvents] = await Promise.all([
+        profileStep("strategy.kpis.proposal_count", () =>
+            prisma.proposal.count({
+                where: { organizationId: orgId, createdAt: { gte: startDate } },
+            })),
+        profileStep("strategy.kpis.accepted_proposals", () =>
+            prisma.proposal.findMany({
+                where: {
+                    organizationId: orgId,
+                    createdAt: { gte: startDate },
+                    status: "accepted",
+                },
+                select: { pricingEstimate: true, createdAt: true, updatedAt: true },
+            })),
+        profileStep("strategy.kpis.meeting_events", () =>
+            prisma.systemEvent.groupBy({
+                by: ["type"],
+                where: {
+                    organizationId: orgId,
+                    type: { in: ["meeting_scheduled", "meeting_no_show"] },
+                    createdAt: { gte: startDate },
+                },
+                _count: { _all: true },
+            })),
+    ]);
 
     let proposalAcceptanceRate = 0;
     let pipelineVelocityDays = 0;
     let averageDealSize = 0;
 
-    if (proposals.length > 0) {
-        const accepted = proposals.filter(p => p.status === 'accepted');
-        proposalAcceptanceRate = (accepted.length / proposals.length) * 100;
-
-        if (accepted.length > 0) {
-            const sumDeal = accepted.reduce((acc, p) => {
-                try {
-                    const pe = JSON.parse(p.pricingEstimate);
-                    return acc + (pe.min || 0);
-                } catch { return acc; }
-            }, 0);
-            averageDealSize = sumDeal / accepted.length / 100;
-
-            const sumVelocity = accepted.reduce((acc, p) => {
-                const diff = Math.abs(p.updatedAt.getTime() - p.createdAt.getTime()) / (1000 * 60 * 60 * 24);
-                return acc + diff;
-            }, 0);
-            pipelineVelocityDays = sumVelocity / accepted.length;
-        }
+    if (proposalCount > 0) {
+        proposalAcceptanceRate = (acceptedProposals.length / proposalCount) * 100;
     }
 
-    // 2. Meeting Metrics
-    const scheduled = await prisma.systemEvent.count({
-        where: { organizationId: orgId, type: 'meeting_scheduled', createdAt: { gte: startDate } }
-    });
-    const noShows = await prisma.systemEvent.count({
-        where: { organizationId: orgId, type: 'meeting_no_show', createdAt: { gte: startDate } }
-    });
+    if (acceptedProposals.length > 0) {
+        const sumDeal = acceptedProposals.reduce((acc, p) => {
+            try {
+                const pe = JSON.parse(p.pricingEstimate);
+                return acc + (pe.min || 0);
+            } catch { return acc; }
+        }, 0);
+        averageDealSize = sumDeal / acceptedProposals.length / 100;
+
+        const sumVelocity = acceptedProposals.reduce((acc, p) => {
+            const diff = Math.abs(p.updatedAt.getTime() - p.createdAt.getTime()) / (1000 * 60 * 60 * 24);
+            return acc + diff;
+        }, 0);
+        pipelineVelocityDays = sumVelocity / acceptedProposals.length;
+    }
+
+    const scheduled = meetingEvents.find((event) => event.type === "meeting_scheduled")?._count._all ?? 0;
+    const noShows = meetingEvents.find((event) => event.type === "meeting_no_show")?._count._all ?? 0;
 
     let meetingShowRate = 0;
     if (scheduled > 0) {
@@ -88,40 +113,50 @@ export async function computeCoreKPIs(orgId: string, days: number = 30): Promise
  * Fetches relevant benchmarks for the organization.
  */
 export async function getBenchmarks(orgId: string, window: string = "30d") {
-    const org = await prisma.organization.findUnique({
-        where: { id: orgId },
-        select: { industry: true, plan: true }
-    });
+    const org = await profileStep("strategy.benchmarks.org", () =>
+        prisma.organization.findUnique({
+            where: { id: orgId },
+            select: { industry: true, plan: true },
+        }));
 
     if (!org) return null;
 
     // Try specific segment first
-    let segment = await prisma.benchmarkSegment.findFirst({
-        where: {
-            industry: org.industry,
-            plan: org.plan,
-            timeWindow: window
-        },
-        orderBy: { periodEnd: 'desc' },
-        include: { snapshots: true }
-    });
+    let segment = await profileStep("strategy.benchmarks.segment_specific", () =>
+        prisma.benchmarkSegment.findFirst({
+            where: {
+                industry: org.industry,
+                plan: org.plan,
+                timeWindow: window,
+            },
+            orderBy: { periodEnd: "desc" },
+            select: { snapshots: { select: { metrics: true } } },
+        }));
 
     // Fallback to industry-only or global
     if (!segment) {
-        segment = await prisma.benchmarkSegment.findFirst({
-            where: {
-                industry: org.industry,
-                timeWindow: window
-            },
-            orderBy: { periodEnd: 'desc' },
-            include: { snapshots: true }
-        }) || await prisma.benchmarkSegment.findFirst({
-            where: {
-                industry: 'all',
-                timeWindow: window
-            },
-            orderBy: { periodEnd: 'desc' },
-            include: { snapshots: true }
+        segment = await profileStep("strategy.benchmarks.segment_fallback", async () => {
+            const industrySegment = await prisma.benchmarkSegment.findFirst({
+                where: {
+                    industry: org.industry,
+                    timeWindow: window,
+                },
+                orderBy: { periodEnd: "desc" },
+                select: { snapshots: { select: { metrics: true } } },
+            });
+
+            if (industrySegment) {
+                return industrySegment;
+            }
+
+            return prisma.benchmarkSegment.findFirst({
+                where: {
+                    industry: "all",
+                    timeWindow: window,
+                },
+                orderBy: { periodEnd: "desc" },
+                select: { snapshots: { select: { metrics: true } } },
+            });
         });
     }
 
@@ -229,15 +264,36 @@ export function generateRecommendations(kpis: StrategyKPIs, bottlenecks: Bottlen
  * Entry point for Strategy Engine.
  */
 export async function runStrategyAnalysis(orgId: string) {
-    const kpis = await computeCoreKPIs(orgId);
-    const benchmarks = await getBenchmarks(orgId);
+    const cached = strategyAnalysisCache.get(orgId);
+    if (cached && cached.expiresAt > Date.now()) {
+        return cached.value;
+    }
+
+    const [kpis, benchmarks] = await Promise.all([
+        profileStep("strategy.compute_kpis", () => computeCoreKPIs(orgId)),
+        profileStep("strategy.get_benchmarks", () => getBenchmarks(orgId)),
+    ]);
     const bottlenecks = detectBottlenecks(kpis, benchmarks);
     const recommendations = generateRecommendations(kpis, bottlenecks);
 
-    return {
+    const result = {
         kpis,
         benchmarks,
         bottlenecks,
-        recommendations
+        recommendations,
     };
+
+    strategyAnalysisCache.set(orgId, {
+        value: result,
+        expiresAt: Date.now() + STRATEGY_ANALYSIS_CACHE_TTL_MS,
+    });
+
+    return result;
+}
+
+export async function recalculateStrategyAnalysis(orgId: string): Promise<StrategyAnalysisResult> {
+    strategyAnalysisCache.delete(orgId);
+    const result = await runStrategyAnalysis(orgId);
+    logger.info("[StrategyEngine] recalc complete", { orgId, recommendationCount: result.recommendations.length });
+    return result;
 }

@@ -1,3 +1,4 @@
+import { withApiLogging } from "@/lib/logger";
 import { NextRequest, NextResponse } from "next/server";
 import {
     applyLegacyAdminApiDeprecationHeaders,
@@ -20,7 +21,7 @@ function withDeprecation(response: NextResponse, mode?: "session" | "legacy_admi
     });
 }
 
-export async function POST(request: NextRequest) {
+async function POSTHandler(request: NextRequest) {
     let mode: "session" | "legacy_admin_token" | undefined;
     let freezeChecked = false;
 
@@ -65,3 +66,5 @@ export async function POST(request: NextRequest) {
         return withDeprecation(NextResponse.json({ error: "Failed to generate benchmarks" }, { status: 500 }), mode);
     }
 }
+
+export const POST = withApiLogging("/api/admin/cron/benchmark-generate", "POST", POSTHandler);

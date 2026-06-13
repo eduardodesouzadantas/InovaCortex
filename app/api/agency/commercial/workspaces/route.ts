@@ -1,3 +1,4 @@
+import { withApiLogging } from "@/lib/logger";
 import { NextRequest, NextResponse } from "next/server";
 import { requireAdminApiAccess, type AdminApiGuardSuccess } from "@/lib/auth/admin-api-guard";
 import { listWorkspacesHandler, runWorkspaceNudgeHandler } from "@/lib/agency/commercial/workspaces";
@@ -8,7 +9,7 @@ function requireOrgId(access: AdminApiGuardSuccess): string | null {
     return access.auth?.organizationId ?? null;
 }
 
-export async function GET(request: NextRequest) {
+async function GETHandler(request: NextRequest) {
     const access = await requireAdminApiAccess(request, {
         requiredRole: "viewer",
         allowLegacyTokenFallback: false,
@@ -23,7 +24,7 @@ export async function GET(request: NextRequest) {
     return listWorkspacesHandler(orgId);
 }
 
-export async function POST(request: NextRequest) {
+async function POSTHandler(request: NextRequest) {
     const access = await requireAdminApiAccess(request, {
         requiredRole: "admin",
         allowLegacyTokenFallback: false,
@@ -37,3 +38,6 @@ export async function POST(request: NextRequest) {
 
     return runWorkspaceNudgeHandler(orgId, access.auth?.userId ?? undefined);
 }
+
+export const GET = withApiLogging("/api/agency/commercial/workspaces", "GET", GETHandler);
+export const POST = withApiLogging("/api/agency/commercial/workspaces", "POST", POSTHandler);

@@ -5,11 +5,12 @@ import { currentMonth, PLAN_LIMITS, getMonthlyCount } from "@/lib/usage";
 import { isStripeEnabled } from "@/lib/stripe";
 import { assertRole } from "@/lib/auth/rbac";
 import Link from "next/link";
+import { normalizeOrganizationAccountStatus, organizationAccountStatusLabel } from "@/lib/billing/account-status";
 import { BillingUpgradeButton } from "./upgrade-button";
 import {
     BrainCircuit, CreditCard, Zap, TrendingUp,
     FileText, MessageSquare, BarChart2, ChevronLeft,
-    CheckCircle2, AlertTriangle, Clock, Shield
+    CheckCircle2, AlertTriangle, Clock
 } from "lucide-react";
 
 export const runtime = "nodejs";
@@ -20,12 +21,10 @@ const PLAN_LABELS: Record<string, { label: string; color: string; badge: string 
     enterprise: { label: "Enterprise", color: "text-yellow-400", badge: "bg-yellow-400/10 border-yellow-400/20" },
 };
 
-const STATUS_CONFIG: Record<string, { icon: any; label: string; color: string }> = {
-    active: { icon: CheckCircle2, label: "Ativo", color: "text-green-500" },
-    trialing: { icon: Clock, label: "Trial", color: "text-blue-400" },
-    past_due: { icon: AlertTriangle, label: "Em atraso", color: "text-red-400" },
-    canceled: { icon: AlertTriangle, label: "Cancelado", color: "text-gray-400" },
-    none: { icon: Shield, label: "Manual", color: "text-muted-foreground" },
+const STATUS_CONFIG: Record<"active" | "trial" | "suspended", { icon: any; label: string; color: string }> = {
+    active: { icon: CheckCircle2, label: "Ativa", color: "text-green-500" },
+    trial: { icon: Clock, label: "Trial", color: "text-blue-400" },
+    suspended: { icon: AlertTriangle, label: "Suspensa", color: "text-red-400" },
 };
 
 function fmt(n: number) {
@@ -58,7 +57,8 @@ export default async function BillingPage({
     const month = currentMonth();
     const planLimits = PLAN_LIMITS[org.plan] ?? PLAN_LIMITS.free;
     const planInfo = PLAN_LABELS[org.plan] ?? PLAN_LABELS.free;
-    const statusConfig = STATUS_CONFIG[org.subscriptionStatus] ?? STATUS_CONFIG.none;
+    const normalizedStatus = normalizeOrganizationAccountStatus(org.subscriptionStatus);
+    const statusConfig = STATUS_CONFIG[normalizedStatus];
 
     // Fetch live usage counts
     const [assessments, aiGenerations, proposals, pdfs, dossiers] = await Promise.all([
@@ -109,10 +109,24 @@ export default async function BillingPage({
                         </span>
                         <span className={`flex items-center gap-1.5 text-sm ${statusConfig.color}`}>
                             <StatusIcon className="w-4 h-4" />
-                            {statusConfig.label}
+                            {organizationAccountStatusLabel(normalizedStatus)}
                         </span>
                     </div>
                 </div>
+
+                {normalizedStatus === "suspended" && (
+                    <div className="glass-panel rounded-xl border border-rose-400/20 bg-rose-400/10 p-5">
+                        <div className="flex items-start gap-3">
+                            <AlertTriangle className="mt-0.5 h-5 w-5 text-rose-200" />
+                            <div className="space-y-1">
+                                <p className="font-semibold text-rose-50">Conta suspensa</p>
+                                <p className="text-sm text-rose-50/80">
+                                    O uso operacional fica bloqueado até a regularização do billing. Você ainda pode revisar esta tela e abrir o fluxo de upgrade.
+                                </p>
+                            </div>
+                        </div>
+                    </div>
+                )}
 
                 {/* Subscription period */}
                 {org.currentPeriodEnd && (
@@ -207,7 +221,6 @@ export default async function BillingPage({
                 {/* Enterprise contact */}
                 {org.plan === "enterprise" && (
                     <div className="glass-panel rounded-xl border border-yellow-500/20 bg-yellow-500/5 p-6 text-center">
-                        <Shield className="w-8 h-8 text-yellow-500 mx-auto mb-3" />
                         <p className="font-bold text-lg">Plano Enterprise Ativo</p>
                         <p className="text-sm text-muted-foreground mt-1">Uso ilimitado · Precisa de algo? Entre em contato via email.</p>
                     </div>

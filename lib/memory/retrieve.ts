@@ -12,44 +12,57 @@ export interface RetrievedChunk {
     score: number;
 }
 
-/**
- * Cosine similarity between two vectors.
- */
-function cosineSimilarity(a: number[], b: number[]): number {
-    if (a.length !== b.length) return 0;
-    let dot = 0, normA = 0, normB = 0;
-    for (let i = 0; i < a.length; i++) {
-        dot += a[i] * b[i];
-        normA += a[i] * a[i];
-        normB += b[i] * b[i];
+type ChunkWithDocument = Awaited<ReturnType<typeof prisma.knowledgeChunk.findMany>>[number] & {
+    document: {
+        title: string;
+        sourceType: string;
+        sourceId: string | null;
+    } | null;
+};
+
+function parseEmbedding(raw: string | null): number[] | null {
+    if (!raw) return null;
+    try {
+        const parsed = JSON.parse(raw) as unknown;
+        if (Array.isArray(parsed) && parsed.every((value) => typeof value === "number")) {
+            return parsed;
+        }
+    } catch {
+        return null;
     }
-    const denom = Math.sqrt(normA) * Math.sqrt(normB);
-    return denom === 0 ? 0 : dot / denom;
+    return null;
 }
 
-/**
- * Retrieval Engine (V33)
- * Steps:
- *   1. Embed the query.
- *   2. Fetch all chunks with embeddings for the org.
- *   3. Rank by cosine similarity.
- *   4. Return top-K chunks with metadata.
- */
+function cosineSimilarity(a: number[], b: number[]): number {
+    if (a.length !== b.length) return 0;
+
+    let dot = 0;
+    let normA = 0;
+    let normB = 0;
+
+    for (let index = 0; index < a.length; index += 1) {
+        dot += a[index] * b[index];
+        normA += a[index] * a[index];
+        normB += b[index] * b[index];
+    }
+
+    const denominator = Math.sqrt(normA) * Math.sqrt(normB);
+    return denominator === 0 ? 0 : dot / denominator;
+}
+
 export async function retrieve(
     orgId: string,
     query: string,
     topK = 8,
-    sessionId?: string
+    sessionId?: string,
 ): Promise<RetrievedChunk[]> {
     try {
-        // 1. Embed the query
-        const [queryVector] = await embedTextBatch([query]);
+        const [queryVector] = await embedTextBatch([query], orgId);
 
-        // 2. Fetch all chunks with embeddings for this org
-        const chunks = await (prisma as any).knowledgeChunk.findMany({
+        const chunks = await prisma.knowledgeChunk.findMany({
             where: {
                 organizationId: orgId,
-                embedding: { not: null }
+                embedding: { not: null },
             },
             select: {
                 id: true,
@@ -60,54 +73,58 @@ export async function retrieve(
                     select: {
                         title: true,
                         sourceType: true,
-                        sourceId: true
-                    }
-                }
+                        sourceId: true,
+                    },
+                },
             },
-            take: 2000 // Guard: max chunks to rank
-        });
+            take: 2000,
+        }) as ChunkWithDocument[];
 
-        if (chunks.length === 0) {
+        if (!chunks.length) {
             logger.warn(`No indexed chunks found for org: ${orgId}. Run /api/admin/memory/reindex first.`);
             return [];
         }
 
-        // 3. Score each chunk by cosine similarity
-        const scored = chunks.map((chunk: any) => ({
-            chunkId: chunk.id,
-            documentId: chunk.documentId,
-            sourceType: chunk.document?.sourceType || "unknown",
-            sourceId: chunk.document?.sourceId || null,
-            title: chunk.document?.title || "Sem título",
-            chunkText: chunk.chunkText,
-            score: cosineSimilarity(queryVector, chunk.embedding as number[])
-        }));
+        const scored = chunks.flatMap((chunk) => {
+            const embedding = parseEmbedding(chunk.embedding);
+            if (!embedding) return [];
 
-        // 4. Sort by score descending and take topK
+            return [{
+                chunkId: chunk.id,
+                documentId: chunk.documentId,
+                sourceType: chunk.document?.sourceType ?? "unknown",
+                sourceId: chunk.document?.sourceId ?? null,
+                title: chunk.document?.title ?? "Sem titulo",
+                chunkText: chunk.chunkText,
+                score: cosineSimilarity(queryVector, embedding),
+            }];
+        });
+
         const results = scored
-            .sort((a: any, b: any) => b.score - a.score)
+            .sort((left, right) => right.score - left.score)
             .slice(0, topK)
-            .filter((r: any) => r.score > 0.1); // Minimum relevance threshold
+            .filter((item) => item.score > 0.1);
 
-        // 5. Log retrieval to RetrievalLog
-        await (prisma as any).retrievalLog.create({
+        await prisma.retrievalLog.create({
             data: {
                 organizationId: orgId,
-                sessionId: sessionId || null,
+                sessionId: sessionId ?? null,
                 queryText: query,
                 topK,
-                resultsJson: results.map((r: any) => ({
-                    chunkId: r.chunkId,
-                    documentId: r.documentId,
-                    score: r.score
-                }))
-            }
+                resultsJson: JSON.stringify(results.map((item) => ({
+                    chunkId: item.chunkId,
+                    documentId: item.documentId,
+                    score: item.score,
+                }))),
+            },
         });
 
         return results;
-
-    } catch (error: any) {
-        logger.error(`Retrieval Engine Error: ${error.message}`);
+    } catch (error: unknown) {
+        logger.error("Retrieval Engine Error", {
+            orgId,
+            error: error instanceof Error ? error.message : String(error),
+        });
         return [];
     }
 }

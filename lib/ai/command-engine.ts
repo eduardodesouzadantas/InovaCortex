@@ -1,11 +1,16 @@
 import { prisma } from "@/lib/prisma";
-import { getCached, setCached, makeCacheKey } from "@/lib/agentops/cache";
-import { logger } from "@/lib/logger";
+import { getCached, makeCacheKey, setCached } from "@/lib/agentops/cache";
+
+type CommandData = Record<string, unknown>;
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+    return typeof value === "object" && value !== null;
+}
 
 export interface CommandResult {
     title: string;
     resumo: string;
-    dados: Record<string, any>;
+    dados: CommandData;
     acoes: string[];
     atalhos: string[];
     meta: {
@@ -15,662 +20,686 @@ export interface CommandResult {
     };
 }
 
-/**
- * lib/ai/command-engine.ts
- * 100% Deterministic execution of AI Control Room commands.
- */
+function isCommandResult(value: unknown): value is CommandResult {
+    return isRecord(value)
+        && typeof value.title === "string"
+        && typeof value.resumo === "string"
+        && isRecord(value.dados)
+        && Array.isArray(value.acoes)
+        && Array.isArray(value.atalhos)
+        && isRecord(value.meta);
+}
+
+type PartialCommandResult = Omit<CommandResult, "meta">;
+
+const COMMAND_TTLS: Record<string, number> = {
+    "/pipeline": 60,
+    "/today": 60,
+    "/revenue": 300,
+    "/growth": 300,
+    "/leaks": 600,
+    "/playbook": 1800,
+    "/objections": 1800,
+    "/client": 120,
+    "/test-strategy": 0,
+    "/team": 60,
+    "/rep": 60,
+    "/assign": 0,
+    "/sla": 60,
+    "/strategy": 300,
+    "/experiment": 300,
+    "/focus": 0,
+    "/run": 0,
+    "/help": 3600,
+};
+
+function finalizeCommandResult(result: PartialCommandResult, ttl: number): CommandResult {
+    return {
+        title: result.title || "Resultado",
+        resumo: result.resumo || "",
+        dados: result.dados || {},
+        acoes: result.acoes || [],
+        atalhos: result.atalhos || ["/help"],
+        meta: {
+            timestamp: new Date().toISOString(),
+            cached: false,
+            ttlSeconds: ttl,
+        },
+    };
+}
+
 export const CommandEngine = {
-    /**
-     * Parse raw string input into command type and args.
-     */
     parseInput(input: string): { type: "command" | "chat"; command?: string; args?: string } {
         const trimmed = input.trim();
-        if (trimmed.startsWith("/")) {
-            const [cmd, ...rest] = trimmed.split(" ");
-            return {
-                type: "command",
-                command: cmd.toLowerCase(),
-                args: rest.join(" ")
-            };
-        }
-        return { type: "chat" };
+        if (!trimmed.startsWith("/")) return { type: "chat" };
+
+        const [command, ...rest] = trimmed.split(" ");
+        return {
+            type: "command",
+            command: command.toLowerCase(),
+            args: rest.join(" ").trim() || undefined,
+        };
     },
 
-    /**
-     * Execute a deterministic command with caching.
-     */
     async executeCommand(
         orgId: string,
         userId: string,
         role: string,
         command: string,
-        args?: string
+        args?: string,
     ): Promise<CommandResult> {
-        const ttlMap: Record<string, number> = {
-            "/pipeline": 60,
-            "/today": 60,
-            "/revenue": 300,
-            "/growth": 300,
-            "/leaks": 600,
-            "/playbook": 1800,
-            "/objections": 1800,
-            "/client": 120,
-            "/test-strategy": 0, // No cache — highly personalized
-            "/team": 60,
-            "/rep": 60,
-            "/assign": 0,
-            "/sla": 60,
-            "/strategy": 300,
-            "/experiment": 300,
-            "/focus": 0,
-            "/run": 0,
-            "/help": 3600
-        };
-
-        const ttl = ttlMap[command] || 60;
+        const ttl = COMMAND_TTLS[command] ?? 60;
         const cacheKey = makeCacheKey("CommandEngine", command, { orgId, args, role }).keyHash;
-
-        // 1. Try Cache
         const hit = await getCached(orgId, cacheKey, ttl * 1000);
-        if (hit) {
+
+        if (isCommandResult(hit?.output)) {
             return {
-                ...(hit.output as any),
-                meta: { ...(hit.output as any).meta, cached: true }
+                ...hit.output,
+                meta: { ...hit.output.meta, cached: true },
             };
         }
 
-        // 2. Execute Deterministic Logic
-        let result: Partial<CommandResult>;
-
+        let partial: PartialCommandResult;
         switch (command) {
             case "/pipeline":
-                result = await this.renderPipeline(orgId);
+                partial = await this.renderPipeline(orgId);
                 break;
             case "/leaks":
-                result = await this.renderLeaks(orgId);
+                partial = await this.renderLeaks(orgId);
                 break;
             case "/today":
-                result = await this.renderToday(orgId);
+                partial = await this.renderToday(orgId);
                 break;
             case "/revenue":
-                result = await this.renderRevenue(orgId);
+                partial = await this.renderRevenue(orgId);
                 break;
             case "/growth":
-                result = await this.renderGrowth(orgId);
+                partial = await this.renderGrowth(orgId);
                 break;
             case "/playbook":
-                result = await this.renderPlaybook(orgId);
+                partial = await this.renderPlaybook(orgId);
                 break;
             case "/client":
-                result = await this.renderClient(orgId, args);
+                partial = await this.renderClient(orgId, args);
                 break;
             case "/objections":
-                result = await this.renderObjections(orgId);
+                partial = await this.renderObjections(orgId);
                 break;
             case "/test-strategy":
-                result = await this.renderTestStrategy(orgId, args);
+                partial = await this.renderTestStrategy(orgId, args);
                 break;
             case "/team":
-                result = await this.renderTeam(orgId);
+                partial = await this.renderTeam(orgId);
                 break;
             case "/rep":
-                result = await this.renderRep(orgId, args);
+                partial = await this.renderRep(orgId, args);
                 break;
             case "/assign":
-                result = await this.renderAssign();
+                partial = await this.renderAssign();
                 break;
             case "/sla":
-                result = await this.renderSLA(orgId);
+                partial = await this.renderSLA(orgId);
                 break;
             case "/strategy":
-                result = await this.renderStrategy(orgId);
+                partial = await this.renderStrategy(orgId);
                 break;
             case "/experiment":
-                result = await this.renderExperiment(orgId);
+                partial = await this.renderExperiment(orgId);
                 break;
             case "/focus":
-                result = await this.renderFocus(orgId, args);
+                partial = await this.renderFocus(orgId, args);
                 break;
             case "/run":
-                result = await this.renderRun(orgId, userId, args);
+                partial = await this.renderRun(orgId, userId, args);
                 break;
             case "/help":
             default:
-                result = this.renderHelp();
+                partial = this.renderHelp();
+                break;
         }
 
-        const finalResult: CommandResult = {
-            title: result.title || "Resultado",
-            resumo: result.resumo || "",
-            dados: result.dados || {},
-            acoes: result.acoes || [],
-            atalhos: result.atalhos || ["/help"],
-            meta: {
-                timestamp: new Date().toISOString(),
-                cached: false,
-                ttlSeconds: ttl
-            }
-        };
-
-        // 3. Set Cache
+        const result = finalizeCommandResult(partial, ttl);
         await setCached(orgId, cacheKey, {
             agentName: "CommandEngine",
             model: "deterministic",
             inputObj: { orgId, args, role },
-            outputObj: finalResult
+            outputObj: result,
         });
 
-        return finalResult;
+        return result;
     },
 
-    async renderPipeline(orgId: string) {
+    async renderPipeline(orgId: string): Promise<PartialCommandResult> {
         const [assessments, meetings, proposals, dealPackets, dealsWithWin] = await Promise.all([
             prisma.assessment.count({ where: { organizationId: orgId } }),
-            (prisma as any).meetingSession.count({ where: { organizationId: orgId } }),
+            prisma.meetingSession.count({ where: { organizationId: orgId } }),
             prisma.proposal.count({ where: { assessment: { organizationId: orgId } } }),
-            (prisma as any).dealPacket.count({ where: { orgId } }),
-            (prisma as any).meetingPerformance.count({ where: { organizationId: orgId, outcome: 'won' } })
+            prisma.dealPacket.count({ where: { orgId } }),
+            prisma.meetingPerformance.count({ where: { organizationId: orgId, outcome: "won" } }),
         ]);
 
         return {
             title: "Pipeline Intelligence",
-            resumo: `Monitoramento completo do funil para sua organização.`,
+            resumo: "Monitoramento completo do funil para sua organizacao.",
             dados: {
                 "Leads (Assessments)": assessments,
-                "Meetings": meetings,
-                "Propostas": proposals,
+                Meetings: meetings,
+                Propostas: proposals,
                 "Pacotes de Fechamento": dealPackets,
-                "Conversão (Won)": dealsWithWin,
-                "trends": [12, 19, 15, 22, 30, 25, 35] // Mock trend for sparkline
+                "Conversao (Won)": dealsWithWin,
+                trends: [12, 19, 15, 22, 30, 25, 35],
             },
             acoes: [
                 "Verificar DealPackets parados.",
-                "Escalar follow-up de propostas visualizadas."
+                "Escalar follow-up de propostas visualizadas.",
             ],
-            atalhos: ["/leaks", "/revenue"]
+            atalhos: ["/leaks", "/revenue"],
         };
     },
 
-    async renderLeaks(orgId: string) {
+    async renderLeaks(orgId: string): Promise<PartialCommandResult> {
         const { scanRevenueLeaks } = await import("@/lib/analytics/leak-detector");
         const analysis = await scanRevenueLeaks(orgId);
 
         return {
             title: "Revenue Leakage Detector",
             resumo: analysis.leakItems.length > 0
-                ? `Detectamos R$ ${(analysis.totalLeakValue / 100).toLocaleString('pt-BR')} em vazamentos de receita críticos.`
-                : "Nenhum vazamento de receita crítico detectado no momento.",
-            dados: Object.fromEntries(analysis.leakItems.map(item => [item.label, item.value])),
-            acoes: analysis.leakItems.map(item => `Intervir: ${item.description}`),
-            atalhos: ["/revenue", "/pipeline"]
+                ? `Detectamos R$ ${(analysis.totalLeakValue / 100).toLocaleString("pt-BR")} em vazamentos de receita criticos.`
+                : "Nenhum vazamento de receita critico detectado no momento.",
+            dados: Object.fromEntries(analysis.leakItems.map((item) => [item.label, item.value])),
+            acoes: analysis.leakItems.map((item) => `Intervir: ${item.description}`),
+            atalhos: ["/revenue", "/pipeline"],
         };
     },
 
-    async renderToday(orgId: string) {
+    async renderToday(orgId: string): Promise<PartialCommandResult> {
         const { generateDailyActions } = await import("@/lib/analytics/action-engine");
         const { actions } = await generateDailyActions(orgId);
 
         return {
             title: "Priority Actions Today",
             resumo: actions.length > 0
-                ? `Você tem ${actions.length} ações prioritárias focadas em receita e tração.`
-                : "Nenhuma ação crítica pendente para hoje.",
-            dados: Object.fromEntries(actions.map((a, i) => [`${i + 1}. ${a.label}`, a.impact])),
-            acoes: actions.map(a => `${a.label}: ${a.description}`),
-            atalhos: ["/revenue", "/leaks", "/growth"]
+                ? `Voce tem ${actions.length} acoes prioritarias focadas em receita e tracao.`
+                : "Nenhuma acao critica pendente para hoje.",
+            dados: Object.fromEntries(actions.map((action, index) => [`${index + 1}. ${action.label}`, action.impact])),
+            acoes: actions.map((action) => `${action.label}: ${action.description}`),
+            atalhos: ["/revenue", "/leaks", "/growth"],
         };
     },
 
-    async renderRevenue(orgId: string) {
+    async renderRevenue(orgId: string): Promise<PartialCommandResult> {
         const { computeRevenueOpportunities } = await import("@/lib/analytics/revenue-brain");
         const ops = await computeRevenueOpportunities(orgId);
 
         return {
             title: "Revenue Brain",
-            resumo: `Identificamos R$ ${(ops.totalOpportunity / 100).toLocaleString('pt-BR')} em oportunidades de alta probabilidade prontos para fechamento.`,
+            resumo: `Identificamos R$ ${(ops.totalOpportunity / 100).toLocaleString("pt-BR")} em oportunidades de alta probabilidade prontas para fechamento.`,
             dados: {
-                "Oportunidade Total": `R$ ${(ops.totalOpportunity / 100).toLocaleString('pt-BR')}`,
+                "Oportunidade Total": `R$ ${(ops.totalOpportunity / 100).toLocaleString("pt-BR")}`,
                 "Deals Quentes": ops.highProbabilityDeals.length,
                 "Leads Parados": ops.stalledDeals.length,
-                "Vitórias Rápidas": ops.fastWins.join(", ") || "Nenhuma detectada",
-                "trends": [4000, 4500, 4200, 5000, 6000, 5800, 7500]
+                "Vitorias Rapidas": ops.fastWins.join(", ") || "Nenhuma detectada",
+                trends: [4000, 4500, 4200, 5000, 6000, 5800, 7500],
             },
             acoes: ops.recommendations,
-            atalhos: ["/leaks", "/pipeline"]
+            atalhos: ["/leaks", "/pipeline"],
         };
     },
 
-    async renderGrowth(orgId: string) {
+    async renderGrowth(orgId: string): Promise<PartialCommandResult> {
         const [prospects, sequences, messages, signals] = await Promise.all([
-            (prisma as any).prospect.count({ where: { orgId } }),
-            (prisma as any).outboundSequence.count({ where: { orgId } }),
-            (prisma as any).outboundMessage.count({ where: { orgId, status: "sent" } }),
-            (prisma as any).growthSignal.count({ where: { organizationId: orgId } })
+            prisma.prospect.count({ where: { orgId } }),
+            prisma.outboundSequence.count({ where: { orgId } }),
+            prisma.outboundMessage.count({ where: { orgId, status: "sent" } }),
+            prisma.growthSignal.count({ where: { organizationId: orgId } }),
         ]);
 
         return {
             title: "Growth & Outbound Engine",
-            resumo: `Métricas de tração e sinais de interesse detectados pelo Autopilot.`,
+            resumo: "Metricas de tracao e sinais de interesse detectados pelo Autopilot.",
             dados: {
                 "Total Prospectos": prospects,
-                "Sequências Ativas": sequences,
+                "Sequencias Ativas": sequences,
                 "Mensagens Enviadas": messages,
-                "Sinais de Crescimento": signals
+                "Sinais de Crescimento": signals,
             },
             acoes: [
                 "Escalar outbound para novos nichos.",
-                "Responder sinais de alta prioridade."
+                "Responder sinais de alta prioridade.",
             ],
-            atalhos: ["/today"]
+            atalhos: ["/today"],
         };
     },
 
-    async renderPlaybook(orgId: string) {
-        // Real data: top playbooks from MeetingPerformance won
-        const wonMeetings = await (prisma as any).meetingPerformance.findMany({
+    async renderPlaybook(orgId: string): Promise<PartialCommandResult> {
+        const wonMeetings = await prisma.meetingPerformance.findMany({
             where: { organizationId: orgId, outcome: "won" },
             orderBy: { closedValue: "desc" },
-            take: 10
+            take: 10,
+            select: { notes: true, closedValue: true },
         });
 
         const { MemoryEngine } = await import("./memory-engine");
         const savedPlaybooks = await MemoryEngine.searchMemories(orgId, undefined, ["playbook", "win_reason"], 5);
 
-        const winPatterns = wonMeetings.map((m: any) =>
-            `✅ ${m.notes?.slice(0, 100) || "Reunião ganha"} — R$ ${(m.closedValue || 0) / 100}`
-        );
+        const winPatterns = wonMeetings.map((meeting) => `Reuniao ganha - R$ ${(meeting.closedValue || 0) / 100}: ${(meeting.notes ?? "Sem notas").slice(0, 100)}`);
 
         return {
-            title: "Top Playbooks de Conversão",
+            title: "Top Playbooks de Conversao",
             resumo: wonMeetings.length > 0
-                ? `Identificados ${wonMeetings.length} padrões de vitória no seu pipeline. Esses são os playbooks que mais convertem.`
-                : "Nenhuma reunião ganha registrada ainda.",
+                ? `Identificados ${wonMeetings.length} padroes de vitoria no seu pipeline.`
+                : "Nenhuma reuniao ganha registrada ainda.",
             dados: {
-                "Reuniões Ganhas": wonMeetings.length,
-                "Valor Total (Won)": `R$ ${wonMeetings.reduce((s: number, m: any) => s + (m.closedValue || 0), 0) / 100}`,
+                "Reunioes Ganhas": wonMeetings.length,
+                "Valor Total (Won)": `R$ ${wonMeetings.reduce((sum, meeting) => sum + (meeting.closedValue || 0), 0) / 100}`,
                 "Playbooks Salvos": savedPlaybooks.length,
-                "Top Padrões": winPatterns.slice(0, 3)
+                "Top Padroes": winPatterns.slice(0, 3),
             },
-            acoes: savedPlaybooks.map((p: any) => `📖 ${p.text.slice(0, 120)}`),
-            atalhos: ["/client", "/objections", "/pipeline"]
+            acoes: savedPlaybooks.map((playbook) => playbook.text.slice(0, 120)),
+            atalhos: ["/client", "/objections", "/pipeline"],
         };
     },
 
-    async renderClient(orgId: string, args?: string) {
+    async renderClient(orgId: string, args?: string): Promise<PartialCommandResult> {
         if (!args?.trim()) {
             return {
                 title: "Client Lookup",
                 resumo: "Use: /client <nome ou ID do lead>",
                 dados: {},
                 acoes: ["Exemplo: /client Aurora Tech"],
-                atalhos: ["/pipeline"]
+                atalhos: ["/pipeline"],
             };
         }
 
         const term = args.trim();
-        const assessments = await (prisma as any).assessment.findMany({
+        const assessments = await prisma.assessment.findMany({
             where: {
                 organizationId: orgId,
                 OR: [
                     { name: { contains: term, mode: "insensitive" } },
                     { company: { contains: term, mode: "insensitive" } },
-                    { id: term }
-                ]
+                    { id: term },
+                ],
             },
             include: {
-                proposals: { orderBy: { createdAt: "desc" }, take: 1 }
+                proposals: {
+                    orderBy: { createdAt: "desc" },
+                    take: 1,
+                },
             },
-            take: 3
+            take: 3,
         });
 
-        if (assessments.length === 0) {
+        if (!assessments.length) {
             return {
                 title: `Cliente: "${term}"`,
                 resumo: "Nenhum cliente encontrado com esse nome ou ID.",
                 dados: {},
                 acoes: ["Verifique o nome e tente novamente."],
-                atalhos: ["/pipeline"]
+                atalhos: ["/pipeline"],
             };
         }
 
-        const a = assessments[0];
-        const latestProposal = (a as any).proposals?.[0];
+        const assessment = assessments[0];
+        const latestProposal = assessment.proposals[0];
 
         return {
-            title: `Cliente: ${a.company} (${a.name})`,
-            resumo: `Histórico completo do cliente ${a.company} — Score: ${a.classification || "—"}`,
+            title: `Cliente: ${assessment.company} (${assessment.name})`,
+            resumo: `Historico completo do cliente ${assessment.company} - Score: ${assessment.classification || "-"}`,
             dados: {
-                "Lead": a.name,
-                "Empresa": a.company,
-                "Segmento": a.segment,
-                "Score": a.classification || "—",
-                "Status": a.status,
-                "Criado em": a.createdAt.toLocaleDateString("pt-BR"),
-                "Última Proposta": latestProposal
+                Lead: assessment.name,
+                Empresa: assessment.company,
+                Segmento: assessment.segment,
+                Score: assessment.classification || "-",
+                Status: assessment.status,
+                "Criado em": assessment.createdAt.toLocaleDateString("pt-BR"),
+                "Ultima Proposta": latestProposal
                     ? `Status: ${latestProposal.status} | ${latestProposal.createdAt.toLocaleDateString("pt-BR")}`
                     : "Nenhuma proposta",
-                "Dores": a.pains || "—"
+                Dores: assessment.pains || "-",
             },
             acoes: [
-                latestProposal?.status === "sent" ? "📩 Follow-up pendente na proposta enviada." : "📋 Criar nova proposta.",
-                `🎯 Score ${a.classification} — ${a.classification === "hot" ? "Prioridade máxima." : "Monitorar."}`
+                latestProposal?.status === "sent" ? "Follow-up pendente na proposta enviada." : "Criar nova proposta.",
+                `Score ${assessment.classification} - ${assessment.classification === "hot" ? "Prioridade maxima." : "Monitorar."}`,
             ],
-            atalhos: ["/playbook", "/pipeline"]
+            atalhos: ["/playbook", "/pipeline"],
         };
     },
 
-    async renderObjections(orgId: string) {
-        // Fetch objection memories
+    async renderObjections(orgId: string): Promise<PartialCommandResult> {
         const { MemoryEngine } = await import("./memory-engine");
         const objections = await MemoryEngine.searchMemories(orgId, undefined, ["objection"], 10);
-
-        // Cross-reference with won meetings to find winning responses
-        const wonMeetings = await (prisma as any).meetingPerformance.findMany({
+        const wonMeetings = await prisma.meetingPerformance.findMany({
             where: { organizationId: orgId, outcome: "won" },
             orderBy: { closedValue: "desc" },
-            take: 5
+            take: 5,
+            select: { closedValue: true },
         });
 
-        const topObjections = objections.slice(0, 5).map((o: any, i: number) => ({
-            [`Objeção ${i + 1}`]: o.text.slice(0, 120),
-            [`Confiança`]: `${o.confidence}/10`
+        const topObjections = objections.slice(0, 5).map((objection, index) => ({
+            [`Objecao ${index + 1}`]: objection.text.slice(0, 120),
+            Confianca: `${objection.confidence}/10`,
         }));
 
         return {
-            title: "Top Objeções & Respostas Vencedoras",
+            title: "Top Objecoes & Respostas Vencedoras",
             resumo: objections.length > 0
-                ? `${objections.length} objeções catalogadas. Reuniões ganhas: ${wonMeetings.length}. Use esses padrões para fechar mais rápido.`
-                : "Nenhuma objeção catalogada ainda. Chat com a IA e diga '/memory salvar objeção: [descrição]'.",
+                ? `${objections.length} objecoes catalogadas. Reunioes ganhas: ${wonMeetings.length}.`
+                : "Nenhuma objecao catalogada ainda.",
             dados: Object.assign({}, ...topObjections, {
                 "Meetings Won (contexto)": wonMeetings.length,
-                "Ticket Médio Won": wonMeetings.length > 0
-                    ? `R$ ${wonMeetings.reduce((s: number, m: any) => s + (m.closedValue || 0), 0) / wonMeetings.length / 100}`
-                    : "—"
+                "Ticket Medio Won": wonMeetings.length > 0
+                    ? `R$ ${wonMeetings.reduce((sum, meeting) => sum + (meeting.closedValue || 0), 0) / wonMeetings.length / 100}`
+                    : "-",
             }),
             acoes: objections.length > 0
-                ? objections.slice(0, 3).map((o: any) => `💬 "${o.text.slice(0, 80)}"`)
-                : ["Registre objeções para melhorar os playbooks de vendas."],
-            atalhos: ["/playbook", "/test-strategy"]
+                ? objections.slice(0, 3).map((objection) => objection.text.slice(0, 80))
+                : ["Registre objecoes para melhorar os playbooks de vendas."],
+            atalhos: ["/playbook", "/test-strategy"],
         };
     },
 
-    async renderTestStrategy(orgId: string, args?: string) {
+    async renderTestStrategy(orgId: string, args?: string): Promise<PartialCommandResult> {
         if (!args?.trim()) {
             return {
                 title: "Test Strategy",
                 resumo: "Use: /test-strategy <mensagem de follow-up ou pitch>",
                 dados: {},
-                acoes: ["Exemplo: /test-strategy Oi João, passando para ver se teve chance de ver a proposta..."],
-                atalhos: ["/playbook", "/objections"]
+                acoes: ["Exemplo: /test-strategy Oi Joao, passando para ver se teve chance de ver a proposta..."],
+                atalhos: ["/playbook", "/objections"],
             };
         }
 
-        // Semantic analysis with internal RAG
         const { buildRagContext } = await import("@/lib/memory/rag-context");
         const rag = await buildRagContext(orgId, args);
-
-        // Heuristic analysis (deterministic, no LLM cost)
         const tone = detectTone(args);
         const cta = detectCTA(args);
         const riskFlags: string[] = [];
 
-        if (args.toLowerCase().includes("só queria")) riskFlags.push("⚠️ Tom passivo — evite 'só queria'");
-        if (args.length > 300) riskFlags.push("⚠️ Mensagem longa — considere resumir");
-        if (!cta) riskFlags.push("⚠️ Sem CTA claro — adicione um próximo passo");
-        if (args.toLowerCase().includes("qualquer dúvida")) riskFlags.push("⚠️ CTA fraco — 'qualquer dúvida' não compromete");
+        if (args.toLowerCase().includes("so queria")) riskFlags.push("Tom passivo - evite 'so queria'");
+        if (args.length > 300) riskFlags.push("Mensagem longa - considere resumir");
+        if (!cta) riskFlags.push("Sem CTA claro - adicione um proximo passo");
+        if (args.toLowerCase().includes("qualquer duvida")) riskFlags.push("CTA fraco - 'qualquer duvida' nao compromete");
 
         const suggestions = [
-            riskFlags.length === 0 ? "✅ Mensagem com bom equilíbrio." : riskFlags[0],
-            rag.chunkCount > 0 ? `📚 ${rag.chunkCount} evidências internas encontradas para reforçar o argumento.` : "💡 Adicione evidências de cases similares.",
-            !cta ? "➡️ Sugestão: termine com 'Conseguimos agendar 15min ainda essa semana?'" : `✅ CTA detectado: "${cta}"`
+            riskFlags[0] ?? "Mensagem com bom equilibrio.",
+            rag.chunkCount > 0 ? `${rag.chunkCount} evidencias internas encontradas.` : "Adicione evidencias de cases similares.",
+            cta ? `CTA detectado: "${cta}"` : "Sugestao: termine com 'Conseguimos agendar 15min ainda essa semana?'",
         ];
 
         return {
-            title: "Análise de Estratégia de Mensagem",
+            title: "Analise de Estrategia de Mensagem",
             resumo: `Analisando: "${args.slice(0, 60)}..."`,
             dados: {
-                "Tom": tone,
+                Tom: tone,
                 "CTA Detectado": cta || "Nenhum",
-                "Riscos": riskFlags.length,
-                "Evidências Internas": rag.chunkCount,
-                "Pontuação Estimada": riskFlags.length === 0 ? "8/10 🟢" : riskFlags.length === 1 ? "5/10 🟡" : "3/10 🔴"
+                Riscos: riskFlags.length,
+                "Evidencias Internas": rag.chunkCount,
+                "Pontuacao Estimada": riskFlags.length === 0 ? "8/10" : riskFlags.length === 1 ? "5/10" : "3/10",
             },
             acoes: suggestions,
-            atalhos: ["/objections", "/playbook"]
+            atalhos: ["/objections", "/playbook"],
         };
     },
 
-    renderHelp() {
+    renderHelp(): PartialCommandResult {
         return {
             title: "Control Room Help",
-            resumo: "Lista de comandos disponíveis.",
+            resumo: "Lista de comandos disponiveis.",
             dados: {
                 "/pipeline": "Resumo do funil comercial.",
-                "/leaks": "Detecção de perdas financeiras.",
-                "/today": "Agenda e ações do dia.",
+                "/leaks": "Deteccao de perdas financeiras.",
+                "/today": "Agenda e acoes do dia.",
                 "/revenue": "Performance financeira e ROI.",
                 "/team": "Ranking do time e faturamento.",
                 "/rep <nome>": "Detalhes de performance por vendedor.",
-                "/sla": "Leads parados por responsável.",
+                "/sla": "Leads parados por responsavel.",
                 "/playbook": "Top playbooks que mais convertem.",
-                "/client <nome>": "Histórico e status de um cliente.",
-                "/objections": "Top objeções + respostas.",
-                "/test-strategy": "Análise de pitch/follow-up."
+                "/client <nome>": "Historico e status de um cliente.",
+                "/objections": "Top objecoes + respostas.",
+                "/test-strategy": "Analise de pitch/follow-up.",
             },
             acoes: ["Experimente digitar /client <nome do seu lead principal>."],
-            atalhos: ["/pipeline", "/leaks", "/today", "/revenue", "/team", "/sla"]
+            atalhos: ["/pipeline", "/leaks", "/today", "/revenue", "/team", "/sla"],
         };
     },
 
-    async renderTeam(orgId: string) {
+    async renderTeam(orgId: string): Promise<PartialCommandResult> {
         const { getLeaderboard } = await import("@/lib/sales/stats-engine");
         const { scanSLABreaches } = await import("@/lib/sales/sla-engine");
         const month = new Date().toISOString().slice(0, 7);
-
         const [leaderboard, breaches] = await Promise.all([
             getLeaderboard(orgId, month),
-            scanSLABreaches(orgId, 48)
+            scanSLABreaches(orgId, 48),
         ]);
 
-        const topReps = leaderboard.slice(0, 3).map(r => `${r.rank}. ${r.name} (R$ ${r.totalRevenueCents / 100})`);
-        const atRiskReps = Array.from(new Set(breaches.map(b => b.repName))).slice(0, 2);
+        const topReps = leaderboard.slice(0, 3).map((rep) => `${rep.rank}. ${rep.name} (R$ ${rep.totalRevenueCents / 100})`);
+        const atRiskReps = Array.from(new Set(breaches.map((breach) => breach.repName))).slice(0, 2);
 
         return {
             title: "Sales Team Leaderboard",
-            resumo: `Faturamento Total: R$ ${leaderboard.reduce((s, r) => s + r.totalRevenueCents, 0) / 100}.`,
+            resumo: `Faturamento Total: R$ ${leaderboard.reduce((sum, rep) => sum + rep.totalRevenueCents, 0) / 100}.`,
             dados: {
-                "Ranking": topReps.join(", "),
+                Ranking: topReps.join(", "),
                 "SLA Breaches": breaches.length,
-                "Reps em Risco": atRiskReps.join(", ") || "Nenhum"
+                "Reps em Risco": atRiskReps.join(", ") || "Nenhum",
             },
             acoes: [
-                breaches.length > 0 ? `⚠️ ${breaches.length} leads parados. Digite /sla para detalhes.` : "✅ SLA em dia.",
-                "Parabenizar top closers pelo faturamento."
+                breaches.length > 0 ? `${breaches.length} leads parados. Digite /sla para detalhes.` : "SLA em dia.",
+                "Parabenizar top closers pelo faturamento.",
             ],
-            atalhos: ["/leaderboard", "/sla", "/revenue"]
+            atalhos: ["/leaderboard", "/sla", "/revenue"],
         };
     },
 
-    async renderRep(orgId: string, args?: string) {
+    async renderRep(orgId: string, args?: string): Promise<PartialCommandResult> {
         if (!args?.trim()) {
-            return { title: "Rep Detail", resumo: "Use: /rep <nome>", dados: {}, acoes: ["Exemplo: /rep Ricardo"], atalhos: ["/team"] };
+            return {
+                title: "Rep Detail",
+                resumo: "Use: /rep <nome>",
+                dados: {},
+                acoes: ["Exemplo: /rep Ricardo"],
+                atalhos: ["/team"],
+            };
         }
 
         const term = args.trim();
-        const rep = await (prisma as any).salesRep.findFirst({
-            where: { organizationId: orgId, name: { contains: term, mode: "insensitive" } }
+        const rep = await prisma.salesRep.findFirst({
+            where: {
+                organizationId: orgId,
+                name: { contains: term, mode: "insensitive" },
+            },
         });
 
         if (!rep) {
-            return { title: "Rep not found", resumo: `Nenhum vendedor encontrado com o nome "${term}".`, dados: {}, acoes: ["Verifique o nome no dashboard."], atalhos: ["/team"] };
+            return {
+                title: "Rep not found",
+                resumo: `Nenhum vendedor encontrado com o nome "${term}".`,
+                dados: {},
+                acoes: ["Verifique o nome no dashboard."],
+                atalhos: ["/team"],
+            };
         }
 
         const { getRepStats } = await import("@/lib/sales/stats-engine");
         const stats = await getRepStats(rep.id, new Date().toISOString().slice(0, 7));
-
-        if (!stats) return { title: "No stats", resumo: "Erro ao buscar estatísticas.", dados: {}, acoes: [], atalhos: [] };
+        if (!stats) {
+            return {
+                title: "No stats",
+                resumo: "Erro ao buscar estatisticas.",
+                dados: {},
+                acoes: [],
+                atalhos: [],
+            };
+        }
 
         return {
             title: `Performance: ${rep.name}`,
-            resumo: `Perfil de ${rep.role} — Win-rate: ${stats.winRate}%`,
+            resumo: `Perfil de ${rep.role} - Win-rate: ${stats.winRate}%`,
             dados: {
-                "Revenue (Mês)": `R$ ${stats.totalRevenueCents / 100}`,
-                "Meta": `${stats.targetPct}%`,
+                "Revenue (Mes)": `R$ ${stats.totalRevenueCents / 100}`,
+                Meta: `${stats.targetPct}%`,
                 "Leads Ativos": stats.totalLeads,
                 "Avg Ticket": `R$ ${stats.avgTicketCents / 100}`,
-                "Tempo p/ Fechar": `${stats.avgDaysToClose} dias`
+                "Tempo p/ Fechar": `${stats.avgDaysToClose} dias`,
             },
             acoes: [
-                stats.targetPct < 50 ? "⚠️ Rep abaixo de 50% da meta. Oferecer suporte." : "🚀 Excelente performance.",
-                "Ver detalhes no Dashboard de Vendas."
+                stats.targetPct < 50 ? "Rep abaixo de 50% da meta. Oferecer suporte." : "Excelente performance.",
+                "Ver detalhes no Dashboard de Vendas.",
             ],
-            atalhos: ["/team", "/sla"]
+            atalhos: ["/team", "/sla"],
         };
     },
 
-    async renderAssign() {
+    async renderAssign(): Promise<PartialCommandResult> {
         return {
-            title: "Atribuição de Leads",
+            title: "Atribuicao de Leads",
             resumo: "Comando executivo bloqueado no WhatsApp.",
             dados: {
-                "Instrução": "Para atribuir leads, use o Dashboard de Vendas ou o Admin Lead Detail."
+                Instrucao: "Para atribuir leads, use o Dashboard de Vendas ou o Admin Lead Detail.",
             },
             acoes: ["Acesse /admin/[id] para atribuir manualmente."],
-            atalhos: ["/team", "/pipeline"]
+            atalhos: ["/team", "/pipeline"],
         };
     },
 
-    async renderSLA(orgId: string) {
-        const { scanSLABreaches, groupBreachesByRep } = await import("@/lib/sales/sla-engine");
+    async renderSLA(orgId: string): Promise<PartialCommandResult> {
+        const { groupBreachesByRep, scanSLABreaches } = await import("@/lib/sales/sla-engine");
         const breaches = await scanSLABreaches(orgId, 48);
         const grouped = groupBreachesByRep(breaches);
-
-        const summary = grouped.slice(0, 3).map(g => `${g.rep.name}: ${g.breaches.length} leads`);
+        const summary = grouped.slice(0, 3).map((group) => `${group.rep.name}: ${group.breaches.length} leads`);
 
         return {
             title: "SLA Risk Queue",
             resumo: breaches.length > 0
                 ? `Existem ${breaches.length} leads quentes ou mornos sem follow-up a mais de 48h.`
-                : "Parabéns! Nenhuma quebra de SLA detectada.",
+                : "Nenhuma quebra de SLA detectada.",
             dados: {
                 "Total de Riscos": breaches.length,
-                "Top Reps em Falta": summary.join(", ") || "Nenhum"
+                "Top Reps em Falta": summary.join(", ") || "Nenhum",
             },
             acoes: breaches.length > 0
                 ? [`Notificar ${breaches[0].repName} sobre o lead ${breaches[0].company}.`]
-                : ["Continue monitorando a saúde do pipeline."],
-            atalhos: ["/team", "/today"]
+                : ["Continue monitorando a saude do pipeline."],
+            atalhos: ["/team", "/today"],
         };
     },
 
-    async renderStrategy(orgId: string) {
+    async renderStrategy(orgId: string): Promise<PartialCommandResult> {
         const { runStrategyAnalysis } = await import("../strategy/strategy-engine");
         const analysis = await runStrategyAnalysis(orgId);
 
         return {
             title: "Executive Strategy Insights",
-            resumo: `Análise de 30 dias: ${analysis.recommendations.length} recomendações críticas para crescimento.`,
+            resumo: `Analise de 30 dias: ${analysis.recommendations.length} recomendacoes criticas para crescimento.`,
             dados: {
-                "Conversão": `${analysis.kpis.proposalAcceptanceRate.toFixed(1)}%`,
+                Conversao: `${analysis.kpis.proposalAcceptanceRate.toFixed(1)}%`,
                 "Show-Rate": `${analysis.kpis.meetingShowRate.toFixed(1)}%`,
-                "Gargalos": analysis.bottlenecks.length,
-                "Top Reco": analysis.recommendations[0]?.title || "Nenhuma detectada"
+                Gargalos: analysis.bottlenecks.length,
+                "Top Reco": analysis.recommendations[0]?.title || "Nenhuma detectada",
             },
-            acoes: analysis.recommendations.slice(0, 3).map(r => `💡 ${r.title}: ${r.summary.slice(0, 60)}...`),
-            atalhos: ["/experiment", "/pipeline", "/revenue"]
+            acoes: analysis.recommendations.slice(0, 3).map((recommendation) => `${recommendation.title}: ${recommendation.summary.slice(0, 60)}...`),
+            atalhos: ["/experiment", "/pipeline", "/revenue"],
         };
     },
 
-    async renderExperiment(orgId: string) {
+    async renderExperiment(orgId: string): Promise<PartialCommandResult> {
         const { runStrategyAnalysis } = await import("../strategy/strategy-engine");
         const { buildExperimentDrafts } = await import("../strategy/experiments");
         const analysis = await runStrategyAnalysis(orgId);
-
         const topBottleneck = analysis.bottlenecks[0];
         const drafts = topBottleneck ? buildExperimentDrafts(topBottleneck.type) : [];
 
         return {
             title: "Growth Experiments (Drafts)",
             resumo: topBottleneck
-                ? `Sugestões para resolver gargalo de: ${topBottleneck.type}`
-                : "Seu funil parece saudável. Abaixo, sugestões gerais de otimização.",
-            dados: Object.fromEntries(drafts.slice(0, 3).map(d => [d.metricKey, d.hypothesis])),
-            acoes: drafts.slice(0, 3).map(d => `🧪 ICE Score ${d.score.toFixed(1)}: ${d.hypothesis.slice(0, 50)}`),
-            atalhos: ["/strategy", "/focus"]
+                ? `Sugestoes para resolver gargalo de: ${topBottleneck.type}`
+                : "Seu funil parece saudavel. Abaixo, sugestoes gerais de otimizacao.",
+            dados: Object.fromEntries(drafts.slice(0, 3).map((draft) => [draft.metricKey, draft.hypothesis])),
+            acoes: drafts.slice(0, 3).map((draft) => `ICE Score ${draft.score.toFixed(1)}: ${draft.hypothesis.slice(0, 50)}`),
+            atalhos: ["/strategy", "/focus"],
         };
     },
 
-    async renderFocus(orgId: string, args?: string) {
+    async renderFocus(orgId: string, args?: string): Promise<PartialCommandResult> {
         if (!args) {
-            return { title: "Strategy Focus", resumo: "Use: /focus <industry|offer|channel>", dados: {}, acoes: [], atalhos: [] };
+            return {
+                title: "Strategy Focus",
+                resumo: "Use: /focus <industry|offer|channel>",
+                dados: {},
+                acoes: [],
+                atalhos: [],
+            };
         }
 
         await prisma.systemSetting.upsert({
-            where: { key_organizationId: { key: 'strategy_focus', organizationId: orgId } },
-            create: { key: 'strategy_focus', organizationId: orgId, value: args },
-            update: { value: args }
+            where: { key_organizationId: { key: "strategy_focus", organizationId: orgId } },
+            create: { key: "strategy_focus", organizationId: orgId, value: args },
+            update: { value: args },
         });
 
         return {
             title: "Focus Updated",
-            resumo: `Foco estratégico definido para: ${args}.`,
+            resumo: `Foco estrategico definido para: ${args}.`,
             dados: { "Novo Foco": args },
-            acoes: ["A engine de recomendações agora priorizará esse pilar."],
-            atalhos: ["/strategy"]
+            acoes: ["A engine de recomendacoes agora priorizara esse pilar."],
+            atalhos: ["/strategy"],
         };
     },
 
-    async renderRun(orgId: string, userId: string, args?: string) {
+    async renderRun(orgId: string, userId: string, args?: string): Promise<PartialCommandResult> {
         if (!args) {
-            return { title: "Run Playbook", resumo: "Use: /run <pb_name>", dados: {}, acoes: [], atalhos: [] };
+            return {
+                title: "Run Playbook",
+                resumo: "Use: /run <pb_name>",
+                dados: {},
+                acoes: [],
+                atalhos: [],
+            };
         }
 
         const playbookId = args.trim();
-
-        // Trigger run via ActionQueue
         const job = await prisma.actionQueue.create({
             data: {
                 organizationId: orgId,
                 type: "playbook_run",
                 priority: "high",
-                payloadJson: JSON.stringify({ playbookId, actorUserId: userId, dryRun: false })
-            }
+                payloadJson: JSON.stringify({ playbookId, actorUserId: userId, dryRun: false }),
+            },
         });
 
         return {
             title: "Playbook Engine",
-            resumo: `Iniciando execução do playbook: ${playbookId}`,
-            dados: { "Queue ID": job.id, "Status": "Queued" },
+            resumo: `Iniciando execucao do playbook: ${playbookId}`,
+            dados: { "Queue ID": job.id, Status: "Queued" },
             acoes: ["Acompanhe o andamento no Execution Center."],
-            atalhos: ["/playbook"]
+            atalhos: ["/playbook"],
         };
-    }
+    },
 };
-
-// ─── Heuristic helpers ────────────────────────────────────────────────────────
 
 function detectTone(text: string): string {
     const lower = text.toLowerCase();
-    if (lower.includes("urgente") || lower.includes("último")) return "🔴 Urgência/pressão";
-    if (lower.includes("empolgad") || lower.includes("animad")) return "🟡 Entusiasta";
-    if (lower.includes("só queria") || lower.includes("apenas")) return "⚪ Passivo";
-    if (lower.includes("oportunidade") || lower.includes("resultado")) return "🟢 Orientado a valor";
-    return "🔵 Neutro";
+    if (lower.includes("urgente") || lower.includes("ultimo")) return "Urgencia/pressao";
+    if (lower.includes("empolgad") || lower.includes("animad")) return "Entusiasta";
+    if (lower.includes("so queria") || lower.includes("apenas")) return "Passivo";
+    if (lower.includes("oportunidade") || lower.includes("resultado")) return "Orientado a valor";
+    return "Neutro";
 }
 
 function detectCTA(text: string): string | null {
     const patterns = [
         /pode(mos)? (agendar|marcar|conversar)/i,
-        /que tal (uma|um) (reunião|call|conversa)/i,
-        /disponível (essa|esta) semana/i,
-        /me diz (um horário|quando)/i,
-        /link (para agendar|de agenda)/i
+        /que tal (uma|um) (reuniao|call|conversa)/i,
+        /disponivel (essa|esta) semana/i,
+        /me diz (um horario|quando)/i,
+        /link (para agendar|de agenda)/i,
     ];
-    for (const p of patterns) {
-        const match = text.match(p);
+
+    for (const pattern of patterns) {
+        const match = text.match(pattern);
         if (match) return match[0];
     }
+
     return null;
 }
-
-

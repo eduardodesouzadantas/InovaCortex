@@ -1,3 +1,4 @@
+import { withApiLogging } from "@/lib/logger";
 import { NextResponse } from "next/server";
 import { getOrgContextFromSession } from "@/lib/auth/org-context";
 import { getSessionFromRequest } from "@/lib/auth/session";
@@ -6,7 +7,7 @@ import { prisma } from "@/lib/prisma";
 
 export const runtime = "nodejs";
 
-export async function POST(req: Request) {
+async function POSTHandler(req: Request) {
     try {
         const session = await getSessionFromRequest(req as any);
         if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
@@ -106,3 +107,5 @@ export async function POST(req: Request) {
         );
     }
 }
+
+export const POST = withApiLogging("/api/admin/cockpit/action", "POST", POSTHandler);

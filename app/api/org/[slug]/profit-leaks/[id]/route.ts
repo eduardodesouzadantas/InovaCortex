@@ -5,47 +5,26 @@
  * Body: { status: "open" | "acknowledged" | "resolved" }
  *
  * Auth/RBAC:
- * - Primary: tenant session scoped to slug
+ * - tenant session scoped to slug
  * - open/acknowledged: closer+
  * - resolved: admin+
- * - Legacy fallback: x-admin-token only when FF_ENABLE_LEGACY_HEADER_ADMIN_AUTH=true
  */
 
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { logger } from "@/lib/logger";
-import { getAuthContextFromRequest } from "@/lib/auth/session";
-import { hasRole } from "@/lib/auth/rbac";
-import { requireOrgContext } from "@/lib/auth/org-context";
+import { logger, withApiLogging } from "@/lib/logger";
+import { requireOrgContextFromRequest } from "@/lib/auth/org-context";
+import {
+    assertTenantRole,
+    invalidTenantInputResponse,
+    resolveTenantRouteError,
+    tenantNotFoundResponse,
+} from "@/lib/auth/tenant-route";
 
 const ALLOWED_STATUSES = ["open", "acknowledged", "resolved"] as const;
 type LeakStatus = typeof ALLOWED_STATUSES[number];
 
-function isTruthyFlag(value: string | undefined): boolean {
-    if (!value) return false;
-    const normalized = value.trim().toLowerCase();
-    return normalized === "1" || normalized === "true" || normalized === "yes" || normalized === "on";
-}
-
-function isLegacyHeaderAdminAuthEnabled(): boolean {
-    return isTruthyFlag(process.env.FF_ENABLE_LEGACY_HEADER_ADMIN_AUTH);
-}
-
-function hasValidLegacyAdminToken(req: NextRequest): boolean {
-    const expected = process.env.ADMIN_SECRET_TOKEN;
-    const provided = req.headers.get("x-admin-token");
-    return !!expected && !!provided && provided === expected;
-}
-
-function mapOrgContextError(err: unknown): { status: 401 | 403 | 404; error: string } {
-    if (err instanceof Error) {
-        if (err.message === "UNAUTHENTICATED") return { status: 401, error: "Unauthorized" };
-        if (err.message === "ORG_NOT_FOUND") return { status: 404, error: "Not found" };
-    }
-    return { status: 403, error: "Forbidden" };
-}
-
-export async function PATCH(
+async function PATCHHandler(
     req: NextRequest,
     { params }: { params: Promise<{ slug: string; id: string }> },
 ) {
@@ -55,70 +34,44 @@ export async function PATCH(
     try {
         body = await req.json();
     } catch {
-        return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
+        return invalidTenantInputResponse("Invalid JSON");
     }
 
     const newStatus = body.status;
     if (!newStatus || !ALLOWED_STATUSES.includes(newStatus)) {
-        return NextResponse.json({ error: "Invalid status" }, { status: 400 });
+        return invalidTenantInputResponse("Invalid status");
     }
 
     const requiredRole: "admin" | "closer" = newStatus === "resolved" ? "admin" : "closer";
 
-    const org = await (prisma as any).organization.findUnique({
-        where: { slug },
-        select: { id: true },
-    }).catch(() => null);
-    if (!org) return NextResponse.json({ error: "Not found" }, { status: 404 });
-
-    const auth = await getAuthContextFromRequest(req);
-    let actor: { mode: "session" | "legacy_header"; role: string; userId: string | null } | null = null;
-
-    if (auth.isAuthenticated) {
-        try {
-            const ctx = await requireOrgContext(slug);
-            if (!hasRole(ctx.role, requiredRole)) {
-                return NextResponse.json({ error: `${requiredRole} role required` }, { status: 403 });
-            }
-            actor = { mode: "session", role: ctx.role, userId: ctx.userId };
-        } catch (err) {
-            const mapped = mapOrgContextError(err);
-            return NextResponse.json({ error: mapped.error }, { status: mapped.status });
-        }
-    } else if (isLegacyHeaderAdminAuthEnabled() && hasValidLegacyAdminToken(req)) {
-        if (!hasRole("admin", requiredRole)) {
-            return NextResponse.json({ error: `${requiredRole} role required` }, { status: 403 });
-        }
-        actor = { mode: "legacy_header", role: "admin", userId: null };
-    } else {
-        return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
-
     try {
-        const updateResult = await (prisma as any).profitLeak.updateMany({
-            where: { id, orgId: org.id },
+        const ctx = await requireOrgContextFromRequest(req, slug);
+        assertTenantRole(ctx.role, requiredRole);
+
+        const updateResult = await prisma.profitLeak.updateMany({
+            where: { id, orgId: ctx.orgId },
             data: { status: newStatus, updatedAt: new Date() },
         });
 
         if (!updateResult?.count) {
-            return NextResponse.json({ error: "Not found" }, { status: 404 });
+            return tenantNotFoundResponse("Profit leak not found");
         }
 
-        const updated = await (prisma as any).profitLeak.findFirst({
-            where: { id, orgId: org.id },
+        const updated = await prisma.profitLeak.findFirst({
+            where: { id, orgId: ctx.orgId },
         });
 
-        await (prisma as any).auditEvent.create({
+        await prisma.auditEvent.create({
             data: {
                 assessmentId: "system",
-                organizationId: org.id,
+                organizationId: ctx.orgId,
                 action: "profitLeakStatusChanged",
                 details: JSON.stringify({
                     leakId: id,
                     newStatus,
-                    actorMode: actor?.mode,
-                    actorRole: actor?.role,
-                    actorUserId: actor?.userId,
+                    actorMode: "session",
+                    actorRole: ctx.role,
+                    actorUserId: ctx.userId,
                 }),
             },
         }).catch(() => null);
@@ -126,13 +79,16 @@ export async function PATCH(
         logger.info("[ProfitLeak PATCH]", {
             id,
             newStatus,
-            actorMode: actor?.mode,
-            orgId: org.id,
+            actorMode: "session",
+            orgId: ctx.orgId,
         });
 
         return NextResponse.json({ ok: true, leak: updated });
-    } catch (err: any) {
-        logger.error("[ProfitLeak PATCH]", { id, err: err?.message });
-        return NextResponse.json({ error: "Internal error" }, { status: 500 });
+    } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        logger.error("[ProfitLeak PATCH]", { id, err: message });
+        return resolveTenantRouteError(err, "Failed to update profit leak");
     }
 }
+
+export const PATCH = withApiLogging("/api/org/[slug]/profit-leaks/[id]", "PATCH", PATCHHandler);

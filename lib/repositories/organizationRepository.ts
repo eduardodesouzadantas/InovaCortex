@@ -4,6 +4,7 @@ import { normalizeOrganizationAccountStatus, type OrganizationAccountStatus } fr
 import { buildPaginationMeta, type PaginationMeta } from "@/lib/http/pagination";
 import { logger } from "@/lib/logger";
 import { prisma } from "@/lib/prisma";
+import { deriveInviteStatus, type InviteStatus } from "@/lib/auth/invite";
 import type { OrganizationUserRecord } from "@/lib/repositories/organizationUserRepository";
 
 export const ORGANIZATION_LIFECYCLE_STATUS_OPTIONS = ["all", "active", "suspended", "onboarding"] as const;
@@ -160,7 +161,21 @@ export interface OrganizationDetailRecord {
         workspaces: number;
     };
     users: OrganizationUserRecord[];
+    invites: OrganizationInviteRecord[];
     workspaces: OrganizationWorkspaceSummary[];
+}
+
+export interface OrganizationInviteRecord {
+    id: string;
+    organizationId: string;
+    email: string;
+    role: string;
+    status: InviteStatus;
+    expiresAt: string;
+    acceptedAt: string | null;
+    revokedAt: string | null;
+    createdByUserId: string;
+    createdAt: string;
 }
 
 export interface ListOrganizationsResult {
@@ -195,6 +210,35 @@ function mapWorkspaceSummary(workspace: {
         goLiveAt: toIso(workspace.goLiveAt),
         proposalId: workspace.proposalId,
         assessmentId: workspace.assessmentId,
+    };
+}
+
+function mapInviteRecord(invite: {
+    id: string;
+    organizationId: string;
+    email: string;
+    role: string;
+    expiresAt: Date;
+    acceptedAt: Date | null;
+    revokedAt: Date | null;
+    createdByUserId: string;
+    createdAt: Date;
+}): OrganizationInviteRecord {
+    return {
+        id: invite.id,
+        organizationId: invite.organizationId,
+        email: invite.email,
+        role: invite.role,
+        status: deriveInviteStatus({
+            acceptedAt: invite.acceptedAt,
+            revokedAt: invite.revokedAt,
+            expiresAt: invite.expiresAt,
+        }),
+        expiresAt: invite.expiresAt.toISOString(),
+        acceptedAt: invite.acceptedAt ? invite.acceptedAt.toISOString() : null,
+        revokedAt: invite.revokedAt ? invite.revokedAt.toISOString() : null,
+        createdByUserId: invite.createdByUserId,
+        createdAt: invite.createdAt.toISOString(),
     };
 }
 
@@ -322,17 +366,19 @@ export async function getOrganizationDetails(organizationId: string): Promise<Or
             return null;
         }
 
-        const [users, workspaces] = await Promise.all([
+        const [users, workspaces, invites] = await Promise.all([
             prisma.user.findMany({
                 where: { organizationId },
                 orderBy: [{ createdAt: "asc" }],
                 take: 10,
                 select: {
                     id: true,
+                    name: true,
                     email: true,
                     role: true,
                     active: true,
                     createdAt: true,
+                    lastAccessAt: true,
                 },
             }),
             prisma.clientWorkspace.findMany({
@@ -347,6 +393,38 @@ export async function getOrganizationDetails(organizationId: string): Promise<Or
                     goLiveAt: true,
                     proposalId: true,
                     assessmentId: true,
+                },
+            }),
+            prisma.userInvite.findMany({
+                where: { organizationId },
+                orderBy: [{ createdAt: "desc" }],
+                take: 10,
+                select: {
+                    id: true,
+                    organizationId: true,
+                    email: true,
+                    role: true,
+                    expiresAt: true,
+                    acceptedAt: true,
+                    revokedAt: true,
+                    createdByUserId: true,
+                    createdAt: true,
+                },
+            }),
+            prisma.userInvite.findMany({
+                where: { organizationId },
+                orderBy: [{ createdAt: "desc" }],
+                take: 10,
+                select: {
+                    id: true,
+                    organizationId: true,
+                    email: true,
+                    role: true,
+                    expiresAt: true,
+                    acceptedAt: true,
+                    revokedAt: true,
+                    createdByUserId: true,
+                    createdAt: true,
                 },
             }),
         ]);
@@ -386,11 +464,14 @@ export async function getOrganizationDetails(organizationId: string): Promise<Or
             },
             users: users.map((user) => ({
                 id: user.id,
+                name: user.name ?? null,
                 email: user.email,
                 role: user.role,
                 active: user.active,
                 createdAt: user.createdAt.toISOString(),
+                lastAccessAt: user.lastAccessAt ? user.lastAccessAt.toISOString() : null,
             })),
+            invites: invites.map(mapInviteRecord),
             workspaces: workspaces.map(mapWorkspaceSummary),
         };
     } catch (error) {

@@ -191,8 +191,8 @@ async function claimPending(campaignId: string, limit: number, token: string): P
   return { claimed, dedupedByClaim };
 }
 
-async function findDupMessage(conversationId: string, key: string, preview: string, start: Date): Promise<boolean> {
-  const msgs = await prisma.whatsAppMessage.findMany({ where: { conversationId, direction: "outbound", type: "template", sentAt: { gte: start } }, select: { text: true, errorJson: true }, orderBy: { sentAt: "desc" }, take: 30 });
+async function findDupMessage(orgId: string, conversationId: string, key: string, preview: string, start: Date): Promise<boolean> {
+  const msgs = await prisma.whatsAppMessage.findMany({ where: { organizationId: orgId, conversationId, direction: "outbound", type: "template", sentAt: { gte: start } }, select: { text: true, errorJson: true }, orderBy: { sentAt: "desc" }, take: 30 });
   for (const m of msgs) {
     if (m.text === preview) return true;
     if (!m.errorJson) continue;
@@ -289,7 +289,7 @@ async function runBatch(campaign: Awaited<ReturnType<typeof campaignWithTemplate
     const bw = batchWindow(at);
     const idem = idempotencyKey({ campaignId: campaign.id, contactId: send.contactId, templateName: campaign.template.name, templateLanguage: campaign.template.language, batchWindowKey: bw.key });
 
-    if (await findDupMessage(conversationId, idem, preview, bw.start)) {
+    if (await findDupMessage(campaign.organizationId, conversationId, idem, preview, bw.start)) {
       dedupedInRun += 1; skippedInRun += 1;
       await prisma.whatsAppCampaignSend.update({ where: { id: send.id }, data: { status: "deduped", sentAt: at, errorCode: `IDEMPOTENT_DUPLICATE:attempt=${attempt}` } });
       await writeAuditEvent({ organizationId: campaign.organizationId, action: "campaign_contact_deduped", details: { campaignId: campaign.id, contactId: send.contactId, idempotencyKey: idem, attempt }, strict: false, context: { campaignId: campaign.id, contactId: send.contactId } });
@@ -310,7 +310,7 @@ async function runBatch(campaign: Awaited<ReturnType<typeof campaignWithTemplate
     }
 
     try {
-      await prisma.whatsAppMessage.create({ data: { conversationId, messageId: sendResult.messageId, direction: "outbound", type: "template", text: preview, status: "sent", sentAt: at, errorJson: JSON.stringify({ campaignId: campaign.id, contactId: send.contactId, templateName: campaign.template.name, templateLanguage: campaign.template.language, idempotencyKey: idem, batchWindowStart: bw.start.toISOString() }) } });
+      await prisma.whatsAppMessage.create({ data: { organizationId: campaign.organizationId, conversationId, contactId: send.contactId, messageId: sendResult.messageId, direction: "outbound", type: "template", text: preview, status: "sent", sentAt: at, errorJson: JSON.stringify({ campaignId: campaign.id, contactId: send.contactId, templateName: campaign.template.name, templateLanguage: campaign.template.language, idempotencyKey: idem, batchWindowStart: bw.start.toISOString() }) } });
     } catch (error) {
       const dup = typeof error === "object" && error !== null && "code" in error && (error as { code?: string }).code === "P2002";
       if (!dup) {
@@ -327,7 +327,7 @@ async function runBatch(campaign: Awaited<ReturnType<typeof campaignWithTemplate
 
     sentInRun += 1;
     await prisma.whatsAppCampaignSend.update({ where: { id: send.id }, data: { status: "sent", sentAt: at, errorCode: null } });
-    await prisma.contact.update({ where: { id: send.contactId }, data: { lastOutboundAt: at, lastMessageAt: at } });
+    await prisma.contact.updateMany({ where: { id: send.contactId, organizationId: campaign.organizationId }, data: { lastOutboundAt: at, lastMessageAt: at } });
   }
 
   const summary0 = await computeSummary(campaign.id, campaign.stats);

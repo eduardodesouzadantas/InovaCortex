@@ -1,5 +1,6 @@
 import { generateText } from "ai";
 import { createOpenAI } from "@ai-sdk/openai";
+import { assertAIEngineAvailable, isAIUnavailableError, toAIUnavailableError } from "@/lib/http/route-errors";
 
 const DEFAULT_MODEL = "gpt-4o-mini";
 const DEFAULT_TIMEOUT_MS = 12_000;
@@ -89,10 +90,8 @@ async function withTimeout<T>(promise: Promise<T>, timeoutMs: number): Promise<T
 }
 
 export async function generateTextCompletion(input: GenerateTextCompletionInput): Promise<TextCompletionResult> {
-    const apiKey = process.env.OPENAI_API_KEY;
-    if (!apiKey) {
-        throw new OpenAIClientError("OPENAI_API_KEY_MISSING", "OPENAI_API_KEY is not configured", false);
-    }
+    assertAIEngineAvailable();
+    const apiKey = process.env.OPENAI_API_KEY as string;
 
     const model = input.model ?? DEFAULT_MODEL;
     const temperature = typeof input.temperature === "number" ? input.temperature : 0.6;
@@ -135,6 +134,9 @@ export async function generateTextCompletion(input: GenerateTextCompletionInput)
             };
         } catch (error) {
             const mapped = mapClientError(error);
+            if (isAIUnavailableError(mapped)) {
+                throw toAIUnavailableError(mapped);
+            }
             const shouldRetry = mapped.retryable && attempt < maxRetries;
             if (!shouldRetry) {
                 throw mapped;

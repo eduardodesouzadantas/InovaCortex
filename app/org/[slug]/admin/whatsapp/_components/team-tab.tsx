@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useParams } from "next/navigation";
 import { Activity, Loader2, Medal, TrendingUp, Trophy } from "lucide-react";
+import { readApiData } from "./api-envelope";
 
 type TeamMember = {
     userId: string;
@@ -17,9 +18,9 @@ function getErrorMessage(err: unknown, fallback: string): string {
     return fallback;
 }
 
-export function TeamTab() {
+export function TeamTab({ slug: providedSlug }: { slug?: string }) {
     const params = useParams();
-    const slug = params.slug as string;
+    const slug = providedSlug ?? (params.slug as string);
     const [team, setTeam] = useState<TeamMember[]>([]);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
@@ -30,8 +31,7 @@ export function TeamTab() {
             setError(null);
             try {
                 const res = await fetch(`/api/org/${slug}/whatsapp/team`);
-                if (!res.ok) throw new Error("Falha ao carregar performance do time");
-                const data = await res.json();
+                const data = await readApiData<{ team?: TeamMember[] }>(res, "Falha ao carregar performance do time");
                 setTeam(data.team || []);
             } catch (err: unknown) {
                 setError(getErrorMessage(err, "Erro inesperado"));

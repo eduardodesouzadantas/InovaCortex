@@ -10,11 +10,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import puppeteerCore from "puppeteer-core";
 import chromium from "@sparticuz/chromium";
-import { logger } from "@/lib/logger";
+import { logger, withApiLogging } from "@/lib/logger";
 
 export const runtime = "nodejs";
 
-export async function GET(
+async function GETHandler(
     req: NextRequest,
     { params }: { params: Promise<{ id: string }> },
 ) {
@@ -87,3 +87,5 @@ export async function GET(
         return new NextResponse("Erro ao gerar PDF", { status: 500 });
     }
 }
+
+export const GET = withApiLogging("/api/pdf/executive-pack/[id]", "GET", GETHandler);

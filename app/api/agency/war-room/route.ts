@@ -1,8 +1,13 @@
+import { withApiLogging } from "@/lib/logger";
 import { NextRequest, NextResponse } from "next/server";
 import { requireAdminApiAccess } from "@/lib/auth/admin-api-guard";
 import { writeAuditEvent } from "@/lib/audit";
 import { apiError, apiSuccess, resolveRequestId } from "@/lib/http/api-response";
-import { generateWarRoomSnapshot } from "@/lib/agency/war-room/war-room-engine";
+import {
+    getLatestWarRoomSnapshot,
+    refreshWarRoomSnapshotCache,
+    type WarRoomSnapshot,
+} from "@/lib/agency/war-room/war-room-engine";
 import { handleApiError } from "@/lib/core/errors/global-error-handler";
 import { logError, logInfo } from "@/lib/core/observability/logger";
 
@@ -33,7 +38,7 @@ function normalizeLevel(level: string): Level {
     return "medium";
 }
 
-function buildFocusActions(snapshot: Awaited<ReturnType<typeof generateWarRoomSnapshot>>): FocusAction[] {
+function buildFocusActions(snapshot: WarRoomSnapshot): FocusAction[] {
     const actions: FocusAction[] = [];
 
     for (const risk of snapshot.risks.slice(0, 3)) {
@@ -72,7 +77,7 @@ function buildFocusActions(snapshot: Awaited<ReturnType<typeof generateWarRoomSn
     return actions.slice(0, 5);
 }
 
-function buildExecutiveHeadline(snapshot: Awaited<ReturnType<typeof generateWarRoomSnapshot>>): string {
+function buildExecutiveHeadline(snapshot: WarRoomSnapshot): string {
     if (snapshot.summary.systemHealth === "critical") {
         return "Operational risk is elevated. Prioritize immediate interventions.";
     }
@@ -103,7 +108,7 @@ async function withTimeout<T>(
     }
 }
 
-export async function GET(request: NextRequest) {
+async function GETHandler(request: NextRequest) {
     const requestId = resolveRequestId(request);
     const access = await requireAdminApiAccess(request, {
         requiredRole: "admin",
@@ -124,19 +129,41 @@ export async function GET(request: NextRequest) {
     const agencyOrganizationId = access.auth.organizationId;
 
     try {
-        const snapshot = await withTimeout(
-            generateWarRoomSnapshot({
+        const persistedSnapshot = await getLatestWarRoomSnapshot(agencyOrganizationId);
+        const snapshot = persistedSnapshot ?? await withTimeout(
+            refreshWarRoomSnapshotCache({
                 agencyOrganizationId,
                 actorUserId,
                 requestId,
+            }).then(async () => {
+                const refreshedSnapshot = await getLatestWarRoomSnapshot(agencyOrganizationId);
+                if (refreshedSnapshot) return refreshedSnapshot;
+                throw new Error("WAR_ROOM_SNAPSHOT_MISSING_AFTER_REFRESH");
             }),
             REQUEST_TIMEOUT_MS,
             new Error("WAR_ROOM_TIMEOUT"),
         );
+        if (!snapshot) {
+            throw new Error("WAR_ROOM_SNAPSHOT_UNAVAILABLE");
+        }
 
         const actionsNow = buildFocusActions(snapshot);
         const payload = {
             ...snapshot,
+            revenueToday: Number.isFinite(snapshot.revenueToday) ? snapshot.revenueToday : 0,
+            revenueThisMonth: Number.isFinite(snapshot.revenueThisMonth) ? snapshot.revenueThisMonth : 0,
+            pipelineValue: Number.isFinite(snapshot.pipelineValue) ? snapshot.pipelineValue : 0,
+            activeDeals: Number.isFinite(snapshot.activeDeals) ? snapshot.activeDeals : 0,
+            conversionRate: Number.isFinite(snapshot.conversionRate) ? snapshot.conversionRate : 0,
+            summary: {
+                ...snapshot.summary,
+                revenueToday: Number.isFinite(snapshot.revenueToday) ? snapshot.revenueToday : 0,
+                revenueThisMonth: Number.isFinite(snapshot.revenueThisMonth) ? snapshot.revenueThisMonth : 0,
+                pipelineValue: Number.isFinite(snapshot.pipelineValue) ? snapshot.pipelineValue : 0,
+                activeDeals: Number.isFinite(snapshot.activeDeals) ? snapshot.activeDeals : 0,
+                conversionRate: Number.isFinite(snapshot.conversionRate) ? snapshot.conversionRate : 0,
+            },
+            source: persistedSnapshot ? "materialized_snapshot" : "live_fallback",
             executiveBrief: {
                 generatedAt: new Date().toISOString(),
                 headline: buildExecutiveHeadline(snapshot),
@@ -209,15 +236,21 @@ export async function GET(request: NextRequest) {
         });
 
         if (timeout) {
-            return NextResponse.json(
-                { ok: false, error: "war_room_timeout", requestId },
-                { status: 504 },
+            return apiError(
+                request,
+                { code: "WAR_ROOM_TIMEOUT", message: "war_room_timeout" },
+                { status: 504, requestId },
             );
         }
         if (databaseUnavailable) {
-            return NextResponse.json(
-                { ok: false, error: "war_room_unavailable", reason: "database_connection_limit", requestId },
-                { status: 503 },
+            return apiError(
+                request,
+                {
+                    code: "WAR_ROOM_UNAVAILABLE",
+                    message: "war_room_unavailable",
+                    details: { reason: "database_connection_limit" },
+                },
+                { status: 503, requestId },
             );
         }
         return handleApiError(request, error, {
@@ -232,3 +265,5 @@ export async function GET(request: NextRequest) {
         });
     }
 }
+
+export const GET = withApiLogging("/api/agency/war-room", "GET", GETHandler);

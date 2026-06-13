@@ -1,3 +1,4 @@
+import { withApiLogging } from "@/lib/logger";
 /**
  * POST /api/admin/meetings/[id]/outcome
  * V16.3-P3: Records outcome for a completed meeting.
@@ -11,7 +12,7 @@ import { prisma } from "@/lib/prisma";
 
 const VALID_OUTCOMES = ["won", "lost", "no_show", "pending"];
 
-export async function POST(
+async function POSTHandler(
     req: Request,
     { params }: { params: Promise<{ id: string }> }
 ) {
@@ -71,3 +72,5 @@ export async function POST(
 
     return NextResponse.json({ success: true, performance: perf });
 }
+
+export const POST = withApiLogging("/api/admin/meetings/[id]/outcome", "POST", POSTHandler);

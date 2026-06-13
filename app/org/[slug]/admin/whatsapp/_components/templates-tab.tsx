@@ -11,6 +11,7 @@ import {
     RefreshCw,
     XCircle,
 } from "lucide-react";
+import { readApiData } from "./api-envelope";
 
 type TemplateItem = {
     id: string;
@@ -42,9 +43,9 @@ function extractPreviewFromParsed(parsed: unknown): string | null {
     return null;
 }
 
-export function TemplatesTab() {
+export function TemplatesTab({ slug: providedSlug }: { slug?: string }) {
     const params = useParams();
-    const slug = params.slug as string;
+    const slug = providedSlug ?? (params.slug as string);
     const [templates, setTemplates] = useState<TemplateItem[]>([]);
     const [loading, setLoading] = useState(true);
     const [refreshing, setRefreshing] = useState(false);
@@ -58,8 +59,7 @@ export function TemplatesTab() {
         setError(null);
         try {
             const res = await fetch(`/api/org/${slug}/whatsapp/templates`);
-            if (!res.ok) throw new Error("Falha ao carregar templates");
-            const data = await res.json();
+            const data = await readApiData<{ templates?: TemplateItem[] }>(res, "Falha ao carregar templates");
             setTemplates(data.templates || []);
         } catch (err: unknown) {
             setError(getErrorMessage(err, "Erro inesperado"));
@@ -82,11 +82,7 @@ export function TemplatesTab() {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
             });
-            const data = await response.json().catch(() => ({}));
-            if (!response.ok) {
-                const details = data?.details ? `: ${data.details}` : "";
-                throw new Error((data?.error || "Falha ao sincronizar templates") + details);
-            }
+            await readApiData<unknown>(response, "Falha ao sincronizar templates");
 
             await fetchTemplates(true);
         } catch (err: unknown) {

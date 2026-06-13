@@ -1,3 +1,4 @@
+import { withApiLogging } from "@/lib/logger";
 import { NextRequest, NextResponse } from "next/server";
 import { requireAdminApiAccess } from "@/lib/auth/admin-api-guard";
 import { resolveTargetOrgId } from "@/lib/agency/target-org";
@@ -5,7 +6,7 @@ import { generateExecutivePack } from "@/lib/agency/executive-pack/handlers";
 
 export const runtime = "nodejs";
 
-export async function POST(request: NextRequest) {
+async function POSTHandler(request: NextRequest) {
     const access = await requireAdminApiAccess(request, {
         requiredRole: "admin",
         allowLegacyTokenFallback: false,
@@ -39,3 +40,5 @@ export async function POST(request: NextRequest) {
         return NextResponse.json({ error: "Generation failed", detail }, { status: 500 });
     }
 }
+
+export const POST = withApiLogging("/api/agency/executive-pack/generate", "POST", POSTHandler);

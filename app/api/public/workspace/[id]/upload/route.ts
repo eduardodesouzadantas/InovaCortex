@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { storeUpload, UploadType } from "@/lib/upload";
-import { logger } from "@/lib/logger";
+import { logger, withApiLogging } from "@/lib/logger";
 
 export const runtime = "nodejs";
 // Default body parser is not present in App Router; we use request.formData() directly.
@@ -14,7 +14,7 @@ const MAX_BYTES = 10 * 1024 * 1024; // 10 MB
  * Accepts multipart/form-data: file + type fields.
  * Requires ?t=<workspacePublicToken>
  */
-export async function POST(
+async function POSTHandler(
     request: NextRequest,
     { params }: { params: Promise<{ id: string }> }
 ) {
@@ -83,3 +83,5 @@ export async function POST(
         return NextResponse.json({ error: "Erro ao salvar o arquivo." }, { status: 500 });
     }
 }
+
+export const POST = withApiLogging("/api/public/workspace/[id]/upload", "POST", POSTHandler);

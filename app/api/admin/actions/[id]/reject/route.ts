@@ -1,9 +1,10 @@
+import { withApiLogging } from "@/lib/logger";
 import { NextResponse } from "next/server";
 import { getSession } from "@/lib/auth/session";
 import { can } from "@/lib/auth/rbac";
 import { prisma } from "@/lib/prisma";
 
-export async function POST(req: Request, { params }: { params: Promise<{ id: string }> }) {
+async function POSTHandler(req: Request, { params }: { params: Promise<{ id: string }> }) {
     try {
         const session = await getSession();
         if (!session || !can(session.role, "updateLeadStatus")) {
@@ -47,3 +48,5 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
         return NextResponse.json({ error: e.message }, { status: 500 });
     }
 }
+
+export const POST = withApiLogging("/api/admin/actions/[id]/reject", "POST", POSTHandler);

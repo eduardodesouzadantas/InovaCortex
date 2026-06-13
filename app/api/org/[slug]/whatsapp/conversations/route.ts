@@ -1,80 +1,38 @@
-import { NextResponse } from "next/server";
-import { Prisma } from "@prisma/client";
-import { prisma } from "@/lib/prisma";
-import { requireOrgContext } from "@/lib/auth/org-context";
+import { withApiLogging } from "@/lib/logger";
+import { NextRequest, NextResponse } from "next/server";
+import { orgContextErrorResponse, requireOrgContextFromRequest } from "@/lib/auth/org-context";
+import { buildPaginationMeta } from "@/lib/http/pagination";
+import { profileRequest } from "@/lib/request-profiler";
+import { listWhatsAppConversations } from "@/lib/whatsapp/conversation-service";
 
-export async function GET(
-    request: Request,
-    { params }: { params: Promise<{ slug: string }> }
+async function GETHandler(
+    request: NextRequest,
+    { params }: { params: Promise<{ slug: string }> },
 ) {
-    try {
-        const { orgId, role, userId } = await requireOrgContext((await params).slug);
+    return profileRequest({ route: "/api/org/[slug]/whatsapp/conversations", method: "GET", targetMs: 500 }, async () => {
+        try {
+            const { slug } = await params;
+            const { orgId, role, userId } = await requireOrgContextFromRequest(request, slug);
+            const { searchParams } = new URL(request.url);
 
-        const { searchParams } = new URL(request.url);
-        const unreadOnly = searchParams.get("unread") === "true";
-        const requestedStatus = searchParams.get("status");
-        const status = requestedStatus === "closed" || requestedStatus === "snoozed" ? requestedStatus : "open";
+            const result = await listWhatsAppConversations({
+                organizationId: orgId,
+                role,
+                userId,
+                searchParams,
+            });
 
-        const isCloser = role === "closer";
-
-        const whereClause: Prisma.WhatsAppConversationWhereInput = {
-            organizationId: orgId,
-            status,
-        };
-
-        if (unreadOnly) {
-            whereClause.unreadCount = { gt: 0 };
+            return NextResponse.json({
+                conversations: result.conversations,
+                pagination: buildPaginationMeta({ ...result.pagination, total: result.total }),
+            }, { status: 200 });
+        } catch (error: unknown) {
+            if (error instanceof Error && ["UNAUTHENTICATED", "ORG_NOT_FOUND", "FORBIDDEN"].includes(error.message)) {
+                return orgContextErrorResponse(error);
+            }
+            throw error;
         }
-
-        if (isCloser) {
-            whereClause.assignedUserId = userId;
-        }
-
-        const conversations = await prisma.whatsAppConversation.findMany({
-            where: whereClause,
-            include: {
-                contact: {
-                    select: {
-                        name: true,
-                        phoneNumberE164: true,
-                        tags: true,
-                        lifecycle: true,
-                        optedOutAt: true,
-                        lastOutboundAt: true,
-                        sessionWindowUntil: true
-                    }
-                },
-                user: {
-                    select: {
-                        email: true
-                    }
-                }
-            },
-            orderBy: [
-                { unreadCount: "desc" },     // Unread first
-                { slaDueAt: "asc" },         // Then SLA closest to breaching
-                { lastMessageAt: "desc" }    // Finally, most recently active
-            ],
-            take: 50
-        });
-
-        const now = new Date();
-        const payload = conversations.map((conversation) => {
-            const isOutside24h = conversation.contact?.sessionWindowUntil
-                ? new Date(conversation.contact.sessionWindowUntil) < now
-                : true;
-            return { ...conversation, isOutside24h };
-        });
-
-        return NextResponse.json({ conversations: payload }, { status: 200 });
-    } catch (error: unknown) {
-        const message = error instanceof Error ? error.message : "";
-        if (message === "UNAUTHENTICATED") return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-        if (message === "ORG_NOT_FOUND") return NextResponse.json({ error: "Organization not found" }, { status: 404 });
-        if (message.startsWith("FORBIDDEN")) {
-            return NextResponse.json({ error: "Forbidden" }, { status: 403 });
-        }
-        console.error("GET /conversations Error:", error);
-        return NextResponse.json({ error: "Internal Error" }, { status: 500 });
-    }
+    });
 }
+
+export const GET = withApiLogging("/api/org/[slug]/whatsapp/conversations", "GET", GETHandler);

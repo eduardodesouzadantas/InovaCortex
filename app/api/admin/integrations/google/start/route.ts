@@ -1,9 +1,10 @@
+import { withApiLogging } from "@/lib/logger";
 import { NextResponse } from "next/server";
 import { getSession } from "@/lib/auth/session";
 import { can } from "@/lib/auth/rbac";
 import { getGoogleAuthUrl } from "@/lib/integrations/google-calendar";
 
-export async function GET(req: Request) {
+async function GETHandler(req: Request) {
     const session = await getSession();
     if (!session || !can(session.role, "manageSettings")) {
         return new NextResponse("Unauthorized", { status: 401 });
@@ -15,3 +16,5 @@ export async function GET(req: Request) {
 
     return NextResponse.redirect(url);
 }
+
+export const GET = withApiLogging("/api/admin/integrations/google/start", "GET", GETHandler);

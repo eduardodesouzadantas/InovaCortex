@@ -4,6 +4,13 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Shield } from "lucide-react";
+import { resolveLoginErrorMessage } from "@/lib/auth/login-error-message";
+
+type LoginResponseBody = {
+    error?: string;
+    code?: string;
+    success?: boolean;
+};
 
 export default function LegacyAdminLoginForm() {
     const [email, setEmail] = useState("");
@@ -28,8 +35,8 @@ export default function LegacyAdminLoginForm() {
                 router.push("/admin");
                 router.refresh();
             } else {
-                const data = (await res.json()) as { error?: string };
-                setError(data.error || "Acesso negado");
+                const data = (await res.json()) as LoginResponseBody;
+                setError(resolveLoginErrorMessage(data));
             }
         } catch {
             setError("Erro de conexão");

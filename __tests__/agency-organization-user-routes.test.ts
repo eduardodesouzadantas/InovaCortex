@@ -43,6 +43,7 @@ describe("Agency organization user routes", () => {
             organizationName: "Acme",
             user: {
                 id: "user-1",
+                name: "Admin Acme",
                 email: "admin@acme.com",
                 role: "owner",
                 active: true,
@@ -54,6 +55,7 @@ describe("Agency organization user routes", () => {
             new Request("http://localhost/api/agency/organizations/org-1/users", {
                 method: "POST",
                 body: new URLSearchParams({
+                    name: "Admin Acme",
                     email: "admin@acme.com",
                     password: "initial-pass",
                 }),
@@ -66,6 +68,7 @@ describe("Agency organization user routes", () => {
         expect(response.headers.get("location")).toContain("userAction=created");
         expect(createOrganizationInitialUserMock).toHaveBeenCalledWith(expect.objectContaining({
             organizationId: "org-1",
+            name: "Admin Acme",
             email: "admin@acme.com",
             password: "initial-pass",
             actorUserId: "agency-user-1",

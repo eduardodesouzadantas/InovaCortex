@@ -1,9 +1,10 @@
+import { withApiLogging } from "@/lib/logger";
 import { NextRequest, NextResponse } from "next/server";
 import { requireAdminApiAccess } from "@/lib/auth/admin-api-guard";
 import { resolveTargetOrgId } from "@/lib/agency/target-org";
 import { scanOrgProfitLeaks } from "@/lib/agency/monitoring/orchestrator-handlers";
 
-export async function POST(request: NextRequest) {
+async function POSTHandler(request: NextRequest) {
     const access = await requireAdminApiAccess(request, {
         requiredRole: "admin",
         allowLegacyTokenFallback: false,
@@ -31,3 +32,5 @@ export async function POST(request: NextRequest) {
         return NextResponse.json({ error: "Scan failed" }, { status: 500 });
     }
 }
+
+export const POST = withApiLogging("/api/agency/monitoring/orchestrator/scan-profit-leaks", "POST", POSTHandler);

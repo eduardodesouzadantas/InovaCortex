@@ -1,3 +1,4 @@
+import { withApiLogging } from "@/lib/logger";
 import { NextRequest, NextResponse } from "next/server";
 import {
     applyLegacyAdminApiDeprecationHeaders,
@@ -17,7 +18,7 @@ export const runtime = "nodejs";
  * POST /api/admin/leads/[id]/proposal
  * Generate (or regenerate) a proposal for a lead.
  */
-export async function POST(
+async function POSTHandler(
     req: NextRequest,
     { params }: { params: Promise<{ id: string }> },
 ) {
@@ -51,7 +52,7 @@ export async function POST(
  * GET /api/admin/leads/[id]/proposal
  * Get all proposal versions for a lead.
  */
-export async function GET(
+async function GETHandler(
     req: NextRequest,
     { params }: { params: Promise<{ id: string }> },
 ) {
@@ -79,7 +80,7 @@ export async function GET(
  * PATCH /api/admin/leads/[id]/proposal
  * Update status or customNotes of the latest proposal.
  */
-export async function PATCH(
+async function PATCHHandler(
     request: NextRequest,
     { params }: { params: Promise<{ id: string }> },
 ) {
@@ -108,3 +109,7 @@ export async function PATCH(
         mode: access.mode,
     });
 }
+
+export const POST = withApiLogging("/api/admin/leads/[id]/proposal", "POST", POSTHandler);
+export const GET = withApiLogging("/api/admin/leads/[id]/proposal", "GET", GETHandler);
+export const PATCH = withApiLogging("/api/admin/leads/[id]/proposal", "PATCH", PATCHHandler);

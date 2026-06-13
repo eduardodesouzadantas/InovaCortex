@@ -1,3 +1,4 @@
+import { withApiLogging } from "@/lib/logger";
 import { NextRequest, NextResponse } from "next/server";
 import {
     applyLegacyAdminApiDeprecationHeaders,
@@ -17,7 +18,7 @@ function respond(mode: "session" | "legacy_admin_token", body: unknown, init?: R
     });
 }
 
-export async function POST(request: NextRequest) {
+async function POSTHandler(request: NextRequest) {
     const redirectResponse = createLegacyAdminFinalRedirectResponse(request, {
         successorPath: "/api/agency/costs/usage/recalculate",
     });
@@ -56,7 +57,7 @@ export async function POST(request: NextRequest) {
     }
 }
 
-export async function GET(request: NextRequest) {
+async function GETHandler(request: NextRequest) {
     const redirectResponse = createLegacyAdminFinalRedirectResponse(request, {
         successorPath: "/api/agency/costs/usage/recalculate",
     });
@@ -84,3 +85,6 @@ export async function GET(request: NextRequest) {
     const result = await readUsageSnapshotOrLive({ orgId, month });
     return respond(access.mode, result);
 }
+
+export const POST = withApiLogging("/api/admin/usage/recalculate", "POST", POSTHandler);
+export const GET = withApiLogging("/api/admin/usage/recalculate", "GET", GETHandler);

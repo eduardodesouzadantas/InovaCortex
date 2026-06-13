@@ -1,52 +1,64 @@
 /**
  * app/api/org/[slug]/deals/[packetId]/route.ts
- * V21: PATCH — DealPacket status mutations (won/lost/resend).
+ * PATCH: DealPacket status mutations (won/lost/resend).
  */
 
-import { NextRequest, NextResponse } from "next/server";
 import { requireOrgContext } from "@/lib/auth/org-context";
-import { logger } from "@/lib/logger";
+import {
+    invalidTenantInputResponse,
+    resolveTenantRouteError,
+    tenantNotFoundResponse,
+} from "@/lib/auth/tenant-route";
+import { logger, withApiLogging } from "@/lib/logger";
+import { NextRequest, NextResponse } from "next/server";
 
-interface Params { params: Promise<{ slug: string; packetId: string }> }
+interface Params {
+    params: Promise<{ slug: string; packetId: string }>;
+}
 
-export async function PATCH(req: NextRequest, { params }: Params) {
+async function PATCHHandler(req: NextRequest, { params }: Params) {
     const { slug, packetId } = await params;
-    let ctx;
-    try { ctx = await requireOrgContext(slug); }
-    catch { return NextResponse.json({ error: "Unauthorized" }, { status: 401 }); }
+    const ctx = await requireOrgContext(slug).catch((error) => error);
+    if (ctx instanceof Error) {
+        return resolveTenantRouteError(ctx, "Failed to resolve tenant context");
+    }
 
-    let body: { action: string };
-    try { body = await req.json(); }
-    catch { return NextResponse.json({ error: "Invalid JSON" }, { status: 400 }); }
+    let body: { action?: string };
+    try {
+        body = await req.json();
+    } catch {
+        return invalidTenantInputResponse("Invalid JSON");
+    }
 
     const { action } = body;
-    if (!action) return NextResponse.json({ error: "action required" }, { status: 400 });
+    if (!action) {
+        return invalidTenantInputResponse("action required");
+    }
 
     const { prisma } = await import("@/lib/prisma");
 
-    const packet = await (prisma as any).dealPacket.findUnique({
-        where: { id: packetId },
-        select: { id: true, orgId: true, assessmentId: true, execSlug: true, status: true },
-    }).catch(() => null);
-
-    if (!packet) return NextResponse.json({ error: "DealPacket not found" }, { status: 404 });
-
-    if (ctx.orgId !== packet.orgId) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
-
     try {
+        const packet = await prisma.dealPacket.findFirst({
+            where: { id: packetId, orgId: ctx.orgId },
+            select: { id: true, orgId: true, assessmentId: true, status: true },
+        });
+
+        if (!packet) {
+            return tenantNotFoundResponse("Deal packet not found");
+        }
+
         switch (action) {
             case "won": {
-                await (prisma as any).dealPacket.update({ where: { id: packet.id }, data: { status: "won" } });
-                return NextResponse.json({ message: "Marcado como Won 🏆", status: "won" });
+                await prisma.dealPacket.update({ where: { id: packet.id }, data: { status: "won" } });
+                return NextResponse.json({ message: "Marcado como Won", status: "won" });
             }
             case "lost": {
-                await (prisma as any).dealPacket.update({ where: { id: packet.id }, data: { status: "lost" } });
+                await prisma.dealPacket.update({ where: { id: packet.id }, data: { status: "lost" } });
                 return NextResponse.json({ message: "Marcado como Lost", status: "lost" });
             }
             case "resend_whatsapp": {
                 logger.info("[DealsAPI] resend_whatsapp requested", { packetId: packet.id });
-                // Record signal + queue action
-                await (prisma as any).dealSignal.create({
+                await prisma.dealSignal.create({
                     data: {
                         orgId: packet.orgId,
                         assessmentId: packet.assessmentId,
@@ -58,10 +70,13 @@ export async function PATCH(req: NextRequest, { params }: Params) {
                 return NextResponse.json({ message: "WhatsApp enfileirado para reenvio", status: packet.status });
             }
             default:
-                return NextResponse.json({ error: `Unknown action: ${action}` }, { status: 400 });
+                return invalidTenantInputResponse(`Unknown action: ${action}`);
         }
-    } catch (err: any) {
-        logger.error("[DealsAPI] Mutation failed", { packetId: packet.id, action, error: err?.message });
-        return NextResponse.json({ error: err?.message ?? "Internal error" }, { status: 500 });
+    } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        logger.error("[DealsAPI] Mutation failed", { packetId, action, error: message });
+        return resolveTenantRouteError(error, "Failed to mutate deal packet");
     }
 }
+
+export const PATCH = withApiLogging("/api/org/[slug]/deals/[packetId]", "PATCH", PATCHHandler);

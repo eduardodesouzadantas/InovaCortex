@@ -1,152 +1,173 @@
-import { buildAlertMessage } from "./response-builder";
 import { sendWhatsAppMessage } from "@/lib/whatsapp";
 import { logger } from "@/lib/logger";
-import type { SystemEventType } from "@/lib/system-events";
+import { buildAlertMessage } from "./response-builder";
 
-/**
- * lib/whatsapp/event-dispatcher.ts — V34
- *
- * Maps SystemEvent types to WhatsApp push notifications.
- * Called fire-and-forget from logSystemEvent().
- *
- * Dispatches:
- *   proposalViewed        → Hot intent alert
- *   profitLeakDetected    → Revenue drain alert
- *   paymentConfirmed      → Success celebration
- *   meetingMissed         → No-show alert
- *   growthSignalDetected  → Opportunity alert
- */
+type EventPayload = Record<string, unknown>;
 
-// ─── Phone Resolution ─────────────────────────────────────────────────────────
+function getString(payload: EventPayload, key: string): string | null {
+    const value = payload[key];
+    return typeof value === "string" && value.trim().length > 0 ? value : null;
+}
+
+function getNumber(payload: EventPayload, key: string): number | null {
+    const value = payload[key];
+    return typeof value === "number" ? value : null;
+}
 
 async function getAlertPhones(): Promise<string[]> {
     return (process.env.WHATSAPP_COPILOT_PHONES || "")
         .split(",")
-        .map(p => p.trim())
+        .map((phone) => phone.trim())
         .filter(Boolean);
 }
 
 async function broadcast(phones: string[], message: string) {
     for (const phone of phones) {
-        await sendWhatsAppMessage(phone, message).catch(err =>
-            logger.error(`EventDispatcher: failed to send to ${phone}: ${err.message}`)
-        );
+        try {
+            await sendWhatsAppMessage(phone, message);
+        } catch (error: unknown) {
+            logger.error("EventDispatcher send failed", {
+                phone,
+                error: error instanceof Error ? error.message : String(error),
+            });
+        }
     }
 }
 
-// ─── Event Handlers ───────────────────────────────────────────────────────────
+async function onProposalViewed(_orgId: string, payload: EventPayload) {
+    const company = getString(payload, "company") ?? getString(payload, "clientName") ?? "Cliente";
+    const viewCount = getNumber(payload, "viewCount") ?? getNumber(payload, "views") ?? 1;
+    const valueCents = getNumber(payload, "valueCents");
+    const valueLabel = valueCents ? `R$ ${(valueCents / 100).toLocaleString("pt-BR")}` : null;
 
-async function onProposalViewed(orgId: string, payload: any) {
-    const company = payload.company || payload.clientName || "Cliente";
-    const viewCount = payload.viewCount || payload.views || 1;
-    const valueR = payload.valueCents ? `R$ ${(payload.valueCents / 100).toLocaleString("pt-BR")}` : null;
-
-    const message = buildAlertMessage({
-        emoji: "👁️",
+    await broadcast(await getAlertPhones(), buildAlertMessage({
+        emoji: "Olho",
         title: "Proposta Visualizada",
         body: [
             `*${company}* abriu a proposta *${viewCount === 1 ? "agora" : `${viewCount}x`}*.`,
-            ...(valueR ? [`\nValor em jogo: *${valueR}*`] : []),
-            `\n🔥 Janela de follow-up quente — aja agora!`
+            ...(valueLabel ? [`\nValor em jogo: *${valueLabel}*`] : []),
+            "\nJanela de follow-up quente - aja agora.",
         ].join("\n"),
         actions: [`/client ${company}`, "/playbook"],
-        footer: "InovaCortex"
-    });
-
-    await broadcast(await getAlertPhones(), message);
+        footer: "InovaCortex",
+    }));
 }
 
-async function onProfitLeakDetected(orgId: string, payload: any) {
-    const title = payload.title || "Vazamento detectado";
-    const lossR = payload.estimatedLossCents
-        ? `R$ ${(payload.estimatedLossCents / 100).toLocaleString("pt-BR")}`
-        : "valor a apurar";
+async function onProfitLeakDetected(_orgId: string, payload: EventPayload) {
+    const title = getString(payload, "title") ?? "Vazamento detectado";
+    const estimatedLossCents = getNumber(payload, "estimatedLossCents");
+    const lossLabel = estimatedLossCents ? `R$ ${(estimatedLossCents / 100).toLocaleString("pt-BR")}` : "valor a apurar";
 
-    const message = buildAlertMessage({
-        emoji: "🚨",
+    await broadcast(await getAlertPhones(), buildAlertMessage({
+        emoji: "Alerta",
         title: "Dreno de Receita",
-        body: `*${title}*\n\nImpacto estimado: *${lossR}* por mês.`,
+        body: `*${title}*\n\nImpacto estimado: *${lossLabel}* por mes.`,
         actions: ["/leaks", "/today"],
-        footer: "InovaCortex"
-    });
-
-    await broadcast(await getAlertPhones(), message);
+        footer: "InovaCortex",
+    }));
 }
 
-async function onPaymentConfirmed(orgId: string, payload: any) {
-    const company = payload.company || payload.clientName || "Cliente";
-    const amountR = payload.amountCents
-        ? `R$ ${(payload.amountCents / 100).toLocaleString("pt-BR")}`
-        : "valor confirmado";
+async function onPaymentConfirmed(_orgId: string, payload: EventPayload) {
+    const company = getString(payload, "company") ?? getString(payload, "clientName") ?? "Cliente";
+    const amountCents = getNumber(payload, "amountCents");
+    const amountLabel = amountCents ? `R$ ${(amountCents / 100).toLocaleString("pt-BR")}` : "valor confirmado";
 
-    const message = buildAlertMessage({
-        emoji: "💰",
-        title: "Pagamento Confirmado!",
-        body: `*${company}* confirmou pagamento de *${amountR}*.\n\n🎯 Receita recorrente garantida.`,
+    await broadcast(await getAlertPhones(), buildAlertMessage({
+        emoji: "Receita",
+        title: "Pagamento Confirmado",
+        body: `*${company}* confirmou pagamento de *${amountLabel}*.\n\nReceita recorrente garantida.`,
         actions: ["/revenue", "/pipeline"],
-        footer: "InovaCortex"
-    });
-
-    await broadcast(await getAlertPhones(), message);
+        footer: "InovaCortex",
+    }));
 }
 
-async function onMeetingMissed(orgId: string, payload: any) {
-    const company = payload.company || payload.leadName || "Lead";
-    const scheduled = payload.scheduledAt
-        ? new Date(payload.scheduledAt).toLocaleString("pt-BR")
-        : "horário não registrado";
+async function onMeetingMissed(_orgId: string, payload: EventPayload) {
+    const company = getString(payload, "company") ?? getString(payload, "leadName") ?? "Lead";
+    const scheduledAt = getString(payload, "scheduledAt");
+    const scheduled = scheduledAt ? new Date(scheduledAt).toLocaleString("pt-BR") : "horario nao registrado";
 
-    const message = buildAlertMessage({
-        emoji: "⏰",
+    await broadcast(await getAlertPhones(), buildAlertMessage({
+        emoji: "Agenda",
         title: "No-Show Detectado",
-        body: [
-            `*${company}* não compareceu à reunião.`,
-            `\nHorário: ${scheduled}`,
-            `\nReagende enquanto ainda está fresco.`
-        ].join("\n"),
+        body: [`*${company}* nao compareceu a reuniao.`, `\nHorario: ${scheduled}`, "\nReagende enquanto ainda esta fresco."].join("\n"),
         actions: [`/client ${company}`, "/today", "/pipeline"],
-        footer: "InovaCortex"
-    });
-
-    await broadcast(await getAlertPhones(), message);
+        footer: "InovaCortex",
+    }));
 }
 
-async function onGrowthSignalDetected(orgId: string, payload: any) {
-    const signal = payload.signal || payload.type || "Sinal de crescimento";
-    const source = payload.source || payload.channel || "canal não identificado";
-    const lead = payload.leadName || payload.company || null;
+async function onGrowthSignalDetected(_orgId: string, payload: EventPayload) {
+    const signal = getString(payload, "signal") ?? getString(payload, "type") ?? "Sinal de crescimento";
+    const source = getString(payload, "source") ?? getString(payload, "channel") ?? "canal nao identificado";
+    const lead = getString(payload, "leadName") ?? getString(payload, "company");
 
-    const message = buildAlertMessage({
-        emoji: "📈",
+    await broadcast(await getAlertPhones(), buildAlertMessage({
+        emoji: "Growth",
         title: "Sinal de Crescimento",
-        body: [
-            `*${signal}* detectado via *${source}*.`,
-            ...(lead ? [`\nLead: *${lead}*`] : []),
-            `\nMomento ideal para ação outbound!`
-        ].join("\n"),
+        body: [`*${signal}* detectado via *${source}*.`, ...(lead ? [`\nLead: *${lead}*`] : []), "\nMomento ideal para acao outbound."].join("\n"),
         actions: ["/pipeline", "/today"],
-        footer: "InovaCortex"
-    });
-
-    await broadcast(await getAlertPhones(), message);
+        footer: "InovaCortex",
+    }));
 }
 
-// ─── Main Dispatcher ──────────────────────────────────────────────────────────
+async function onRepPerformanceAlert(_orgId: string, payload: EventPayload) {
+    const name = getString(payload, "name") ?? "Rep";
+    const score = getNumber(payload, "score") ?? 0;
+    const replyTime = getNumber(payload, "replyTime") ?? 0;
+    const reason = getString(payload, "reason") ?? "Sem motivo informado";
 
-const DISPATCHED_EVENTS: Partial<Record<SystemEventType, true>> = {
-    proposal_viewed: true,
-    profit_leak_detected: true,
-    payment_received: true,
-};
+    await broadcast(await getAlertPhones(), buildAlertMessage({
+        emoji: "Performance",
+        title: "Alerta de Performance",
+        body: `*${name}* esta operando abaixo da meta.\n\nScore: *${score}*\nTempo Medio: *${replyTime}m*\nMotivo: ${reason}`,
+        actions: ["/leaderboard", `/rep ${name}`],
+        footer: "Performance OS",
+    }));
+}
 
-/**
- * Dispatch a WhatsApp notification for a SystemEvent.
- * Called fire-and-forget — never throws.
- */
+async function onSlaBreach(_orgId: string, payload: EventPayload) {
+    const assignedTo = getString(payload, "assignedTo") ?? "Responsavel";
+    const slaDueAt = getString(payload, "slaDueAt");
+    const preview = getString(payload, "preview") ?? "Sem preview";
+
+    await broadcast(await getAlertPhones(), buildAlertMessage({
+        emoji: "SLA",
+        title: "Quebra de SLA",
+        body: `Conversa pendente com *${assignedTo}*.\n\nVencimento: ${slaDueAt ? new Date(slaDueAt).toLocaleString("pt-BR") : "nao informado"}\nUltima: "${preview}"`,
+        actions: ["/sla", "/today"],
+        footer: "SLA Engine",
+    }));
+}
+
+async function onLeakOwnerAlert(_orgId: string, payload: EventPayload) {
+    const ownerName = getString(payload, "ownerName") ?? "Responsavel";
+    const title = getString(payload, "title") ?? "Vazamento";
+    const impact = getNumber(payload, "impact") ?? 0;
+
+    await broadcast(await getAlertPhones(), buildAlertMessage({
+        emoji: "Leak",
+        title: "Responsabilidade de Vazamento",
+        body: `*${ownerName}* e responsavel por um vazamento critico.\n\nItem: ${title}\nImpacto: *R$ ${(impact / 100).toLocaleString("pt-BR")}*`,
+        actions: ["/leaks", `/rep ${ownerName}`],
+        footer: "Leak Engine",
+    }));
+}
+
+async function onClientDisabled(_orgId: string, payload: EventPayload) {
+    const entityId = getString(payload, "entityId") ?? "workspace";
+
+    await broadcast(await getAlertPhones(), buildAlertMessage({
+        emoji: "Cliente",
+        title: "Cliente Desativado",
+        body: `Acesso ao workspace *${entityId}* foi revogado e os tokens rotacionados.`,
+        actions: ["/command", "/today"],
+        footer: "Admin Controls",
+    }));
+}
+
 export async function dispatchEventNotification(
     type: string,
     orgId: string,
-    payload: any
+    payload: EventPayload,
 ) {
     try {
         switch (type) {
@@ -178,54 +199,12 @@ export async function dispatchEventNotification(
                 await onClientDisabled(orgId, payload);
                 break;
             default:
-                // No notification for this event type
                 break;
         }
-    } catch (err: any) {
-        logger.error(`EventDispatcher: ${type} handler failed: ${err.message}`);
+    } catch (error: unknown) {
+        logger.error("EventDispatcher handler failed", {
+            type,
+            error: error instanceof Error ? error.message : String(error),
+        });
     }
-}
-
-async function onRepPerformanceAlert(orgId: string, payload: any) {
-    const message = buildAlertMessage({
-        emoji: "📉",
-        title: "Alerta de Performance",
-        body: `*${payload.name}* está operando abaixo da meta.\n\nScore: *${payload.score}*\nTempo Médio: *${payload.replyTime}m*\nMotivo: ${payload.reason}`,
-        actions: ["/leaderboard", `/rep ${payload.name}`],
-        footer: "Performance OS"
-    });
-    await broadcast(await getAlertPhones(), message);
-}
-
-async function onSlaBreach(orgId: string, payload: any) {
-    const message = buildAlertMessage({
-        emoji: "⏰",
-        title: "Quebra de SLA",
-        body: `Conversa pendente com *${payload.assignedTo}*.\n\nVencimento: ${new Date(payload.slaDueAt).toLocaleString("pt-BR")}\nÚltima: "${payload.preview}"`,
-        actions: ["/sla", "/today"],
-        footer: "SLA Engine"
-    });
-    await broadcast(await getAlertPhones(), message);
-}
-
-async function onLeakOwnerAlert(orgId: string, payload: any) {
-    const message = buildAlertMessage({
-        emoji: "💸",
-        title: "Responsabilidade de Vazamento",
-        body: `*${payload.ownerName}* é responsável por um vazamento crítico.\n\nItem: ${payload.title}\nImpacto: *R$ ${(payload.impact / 100).toLocaleString("pt-BR")}*`,
-        actions: ["/leaks", `/rep ${payload.ownerName}`],
-        footer: "Leak Engine"
-    });
-    await broadcast(await getAlertPhones(), message);
-}
-
-async function onClientDisabled(orgId: string, payload: any) {
-    const message = buildAlertMessage({
-        emoji: "🚫",
-        title: "Cliente Desativado",
-        body: `Acesso ao workspace *${payload.entityId}* foi revogado e os tokens rotacionados.`,
-        actions: ["/command", "/today"],
-        footer: "Admin Controls"
-    });
-    await broadcast(await getAlertPhones(), message);
 }

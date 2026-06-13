@@ -1,7 +1,9 @@
+import { withApiLogging } from "@/lib/logger";
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
+import { createSystemEvent } from "@/lib/system-events";
 
-export async function POST(
+async function POSTHandler(
     req: NextRequest,
     { params }: { params: Promise<{ slug: string }> }
 ) {
@@ -23,14 +25,14 @@ export async function POST(
     });
 
     // 2. Trigger System Event for WhatsApp alert
-    await prisma.systemEvent.create({
-        data: {
-            type: "meeting_scheduled",
-            message: `Lead demonstrou interesse na oferta: ${offer.name}`,
-            organizationId: offer.organizationId,
-            payloadJson: JSON.stringify({ offerId: offer.id, source: "one_pager" })
-        }
+    await createSystemEvent({
+        type: "meeting_scheduled",
+        message: `Lead demonstrou interesse na oferta: ${offer.name}`,
+        organizationId: offer.organizationId,
+        payloadJson: JSON.stringify({ offerId: offer.id, source: "one_pager" }),
     });
 
     return NextResponse.json({ success: true });
 }
+
+export const POST = withApiLogging("/api/public/offers/[slug]/cta", "POST", POSTHandler);

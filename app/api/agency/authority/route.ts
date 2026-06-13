@@ -1,10 +1,11 @@
+import { withApiLogging } from "@/lib/logger";
 import { NextRequest, NextResponse } from "next/server";
 import { requireAdminApiAccess } from "@/lib/auth/admin-api-guard";
 import { listAuthorityAssetsHandler, runAuthorityActionHandler } from "@/lib/agency/authority/handlers";
 
 export const runtime = "nodejs";
 
-export async function POST(request: NextRequest) {
+async function POSTHandler(request: NextRequest) {
     const access = await requireAdminApiAccess(request, {
         requiredRole: "admin",
         allowLegacyTokenFallback: false,
@@ -16,7 +17,7 @@ export async function POST(request: NextRequest) {
     return runAuthorityActionHandler(access.auth.organizationId, access.auth.userId, body);
 }
 
-export async function GET(request: NextRequest) {
+async function GETHandler(request: NextRequest) {
     const access = await requireAdminApiAccess(request, {
         requiredRole: "viewer",
         allowLegacyTokenFallback: false,
@@ -31,3 +32,6 @@ export async function GET(request: NextRequest) {
         page: Number(searchParams.get("page") ?? 1),
     });
 }
+
+export const POST = withApiLogging("/api/agency/authority", "POST", POSTHandler);
+export const GET = withApiLogging("/api/agency/authority", "GET", GETHandler);

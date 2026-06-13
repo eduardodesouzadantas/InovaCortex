@@ -1,21 +1,24 @@
+import { withApiLogging } from "@/lib/logger";
 import { NextResponse } from "next/server";
-import { prisma } from "@/lib/prisma";
-import { getSession } from "@/lib/auth/session";
-import { hasRole } from "@/lib/auth/rbac";
 import { getLeaderboard } from "@/lib/sales/stats-engine";
+import { buildPaginationMeta, parsePagination } from "@/lib/http/pagination";
+import { orgContextErrorResponse, requireOrgContext } from "@/lib/auth/org-context";
 
-const getOrg = async (slug: string) =>
-    prisma.organization.findUnique({ where: { slug }, select: { id: true } });
-
-export async function GET(req: Request, { params }: { params: Promise<{ slug: string }> }) {
-    const session = await getSession();
-    if (!session || session.orgSlug !== (await params).slug) return NextResponse.json({ error: "UNAUTHORIZED" }, { status: 401 });
-    const org = await getOrg((await params).slug);
-    if (!org) return NextResponse.json({ error: "Not found" }, { status: 404 });
+async function GETHandler(req: Request, { params }: { params: Promise<{ slug: string }> }) {
+    const { slug } = await params;
+    const ctx = await requireOrgContext(slug).catch((error) => error);
+    if (ctx instanceof Error) return orgContextErrorResponse(ctx);
 
     const { searchParams } = new URL(req.url);
     const month = searchParams.get("month") || new Date().toISOString().slice(0, 7);
+    const pagination = parsePagination(searchParams, { defaultLimit: 25, maxLimit: 100 });
 
-    const leaderboard = await getLeaderboard(org.id, month);
-    return NextResponse.json({ leaderboard, month });
+    const leaderboard = await getLeaderboard(ctx.orgId, month);
+    return NextResponse.json({
+        leaderboard: leaderboard.slice(pagination.skip, pagination.skip + pagination.limit),
+        month,
+        pagination: buildPaginationMeta({ ...pagination, total: leaderboard.length }),
+    });
 }
+
+export const GET = withApiLogging("/api/org/[slug]/sales/leaderboard", "GET", GETHandler);

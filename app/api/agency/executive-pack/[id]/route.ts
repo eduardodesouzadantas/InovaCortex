@@ -1,8 +1,9 @@
+import { withApiLogging } from "@/lib/logger";
 import { NextRequest, NextResponse } from "next/server";
 import { requireAdminApiAccess } from "@/lib/auth/admin-api-guard";
 import { getExecutivePack } from "@/lib/agency/executive-pack/handlers";
 
-export async function GET(
+async function GETHandler(
     request: NextRequest,
     { params }: { params: Promise<{ id: string }> },
 ) {
@@ -21,3 +22,5 @@ export async function GET(
         return NextResponse.json({ error: "Internal error" }, { status: 500 });
     }
 }
+
+export const GET = withApiLogging("/api/agency/executive-pack/[id]", "GET", GETHandler);

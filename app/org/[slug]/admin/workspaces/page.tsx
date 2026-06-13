@@ -4,8 +4,10 @@ import { requireOrgContext } from "@/lib/auth/org-context";
 import { assertRole } from "@/lib/auth/rbac";
 import { prisma } from "@/lib/prisma";
 import { getAuthContext } from "@/lib/auth/session";
+import { refreshOnboardingStatusFromTenant } from "@/lib/onboarding-status";
 import Link from "next/link";
 import { ChevronLeft, Briefcase, CheckCircle2, AlertTriangle, Zap, ArrowRight } from "lucide-react";
+import { OnboardingStatusCard } from "./onboarding-status-card";
 
 export const runtime = "nodejs";
 
@@ -49,6 +51,7 @@ export default async function WorkspacesListPage({
         },
         orderBy: { createdAt: "desc" },
     });
+    const onboarding = await refreshOnboardingStatusFromTenant(ctx!.orgId).catch(() => null);
 
     // Enrich with assessment data
     const assessmentIds = workspaces.map((ws: any) => ws.assessmentId);
@@ -81,6 +84,10 @@ export default async function WorkspacesListPage({
                     <h1 className="text-2xl font-black">Execução de Projetos</h1>
                     <p className="text-sm text-muted-foreground">{workspaces.length} workspaces</p>
                 </div>
+
+                {onboarding && (
+                    <OnboardingStatusCard orgSlug={slug} onboarding={onboarding} />
+                )}
 
                 {workspaces.length === 0 && (
                     <div className="text-center py-20">

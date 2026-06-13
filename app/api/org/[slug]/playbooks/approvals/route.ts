@@ -1,18 +1,25 @@
+import { withApiLogging } from "@/lib/logger";
 import { NextRequest, NextResponse } from "next/server";
+import { orgContextErrorResponse, requireOrgContext } from "@/lib/auth/org-context";
 import { prisma } from "@/lib/prisma";
 
-export async function GET(req: NextRequest, { params }: { params: Promise<{ slug: string }> }) {
+async function GETHandler(req: NextRequest, { params }: { params: Promise<{ slug: string }> }) {
     try {
-        const org = await prisma.organization.findUnique({ where: { slug: (await params).slug } });
-        if (!org) return NextResponse.json({ error: "Org not found" }, { status: 404 });
+        const { slug } = await params;
+        const { orgId } = await requireOrgContext(slug);
 
         const approvals = await prisma.playbookApproval.findMany({
-            where: { organizationId: org.id, status: "pending" },
+            where: { organizationId: orgId, status: "pending" },
             orderBy: { createdAt: "desc" },
         });
 
         return NextResponse.json({ approvals });
-    } catch (error: any) {
-        return NextResponse.json({ error: String(error) }, { status: 500 });
+    } catch (error) {
+        if (error instanceof Error && ["UNAUTHENTICATED", "ORG_NOT_FOUND", "FORBIDDEN"].includes(error.message)) {
+            return orgContextErrorResponse(error);
+        }
+        return NextResponse.json({ error: "Failed to fetch approvals" }, { status: 500 });
     }
 }
+
+export const GET = withApiLogging("/api/org/[slug]/playbooks/approvals", "GET", GETHandler);

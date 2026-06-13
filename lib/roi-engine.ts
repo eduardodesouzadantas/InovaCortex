@@ -42,17 +42,21 @@ export interface ROIResult {
 
 /** Estimated number of manual hours wasted per person per month */
 const HOURS_PER_PERSON_MONTH: Record<string, number> = {
+    "1-5": 40,
     "1-10": 40,
     "11-50": 60,
     "51-200": 80,
+    "100+": 100,
     "200+": 100,
 };
 
 /** Approximate headcount midpoint for calculations */
 const TEAM_MIDPOINT: Record<string, number> = {
+    "1-5": 3,
     "1-10": 5,
     "11-50": 30,
     "51-200": 120,
+    "100+": 180,
     "200+": 250,
 };
 

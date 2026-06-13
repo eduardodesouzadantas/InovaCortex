@@ -148,7 +148,7 @@ export async function scanRevenueLeaks(orgId: string): Promise<LeakResult> {
         // 5. Tasks Bloqueadas (Operacional)
         const blockedTasks = await (prisma as any).implementationTask.count({
             where: {
-                workspace: { organizationId: orgId },
+                organizationId: orgId,
                 status: "blocked"
             }
         });

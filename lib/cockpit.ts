@@ -17,6 +17,7 @@
  */
 
 import { prisma } from "@/lib/prisma";
+import { normalizeOrganizationAccountStatus } from "@/lib/billing/account-status";
 
 // ─── 1. Mission Status ────────────────────────────────────────────────────────
 
@@ -64,7 +65,7 @@ export async function getMissionStatus(orgId: string) {
     return {
         orgName: org?.name ?? orgId,
         plan: org?.plan ?? "free",
-        subscriptionStatus: org?.subscriptionStatus ?? "none",
+        subscriptionStatus: normalizeOrganizationAccountStatus(org?.subscriptionStatus),
         healthAI: aiFunctional ? "ok" : "degraded",
         healthFunnel: funnelEnabled ? "ok" : "off",
         healthAlerts: (alerts?.length ?? 0) > 0 ? "critical" : "ok",
@@ -437,7 +438,7 @@ export async function getBillingSnapshot(orgId: string) {
 
     return {
         plan: org?.plan ?? "free",
-        subscriptionStatus: org?.subscriptionStatus ?? "none",
+        subscriptionStatus: normalizeOrganizationAccountStatus(org?.subscriptionStatus),
         hasStripe: !!org?.stripeSubscriptionId,
         currentPeriodEnd: org?.currentPeriodEnd ?? null,
         maxAssessments,

@@ -1,98 +1,94 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { CommandEngine } from "@/lib/ai/command-engine";
-import { getSession } from "@/lib/auth/session";
 import { hasRole } from "@/lib/auth/rbac";
-import { logger } from "@/lib/logger";
+import { withApiLogging } from "@/lib/logger";
+import { z } from "zod";
+import { readValidatedJson } from "@/lib/http/route-errors";
+import { orgContextErrorResponse, requireOrgContext } from "@/lib/auth/org-context";
+
+const commandRequestSchema = z.object({
+    command: z.string().trim().min(1),
+    args: z.string().optional().default(""),
+    sessionId: z.string().trim().min(1).optional(),
+    scope: z.enum(["admin", "ceo"]).default("admin"),
+});
 
 /**
  * POST /api/org/[slug]/ai/command
  * 100% Deterministic command endpoint with Auth + RBAC.
  */
-export async function POST(
+async function POSTHandler(
     request: Request,
     { params }: { params: Promise<{ slug: string }> }
 ) {
-    try {
-        const { slug } = await params;
-        const body = await request.json();
-        const { command, args = "", sessionId, scope = "admin" } = body;
+    const { slug } = await params;
+    const { command, args, sessionId, scope } = await readValidatedJson(request, commandRequestSchema);
 
-        // 1. Auth & RBAC Check
-        const session = await getSession();
-        if (!session || session.orgSlug !== slug) {
-            return NextResponse.json({ error: "UNAUTHORIZED" }, { status: 401 });
-        }
+    const ctx = await requireOrgContext(slug).catch((error) => error);
+    if (ctx instanceof Error) return orgContextErrorResponse(ctx);
 
-        if (!hasRole(session.role, "admin")) {
-            return NextResponse.json({ error: "FORBIDDEN" }, { status: 403 });
-        }
-
-        if (!command) {
-            return NextResponse.json({ error: "Command is required" }, { status: 400 });
-        }
-
-        const org = await prisma.organization.findUnique({
-            where: { slug },
-            select: { id: true, name: true }
-        });
-        if (!org) return NextResponse.json({ error: "Org not found" }, { status: 404 });
-
-        // 2. Resolve or Create Session
-        let chatSession;
-        if (sessionId) {
-            chatSession = await (prisma as any).aIChatSession.findUnique({ where: { id: sessionId } });
-        } else {
-            chatSession = await (prisma as any).aIChatSession.findFirst({
-                where: { organizationId: org.id, scope: scope }
-            });
-        }
-
-        if (!chatSession) {
-            chatSession = await (prisma as any).aIChatSession.create({
-                data: {
-                    organizationId: org.id,
-                    scope: scope,
-                    title: scope === "ceo" ? "CEO Room" : "Admin Room",
-                    createdByUserId: session.userId
-                }
-            });
-        }
-
-        // 3. Execute Deterministic Command
-        const result = await CommandEngine.executeCommand(
-            org.id,
-            session.userId,
-            session.role,
-            command,
-            args
-        );
-
-        // 4. Persistence
-        await (prisma as any).aIChatMessage.createMany({
-            data: [
-                {
-                    sessionId: chatSession.id,
-                    organizationId: org.id,
-                    role: "user",
-                    content: `${command} ${args}`.trim(),
-                    command: command
-                },
-                {
-                    sessionId: chatSession.id,
-                    organizationId: org.id,
-                    role: "assistant",
-                    content: JSON.stringify(result),
-                    command: command,
-                    meta: { deterministic: true, cacheHit: result.meta.cached }
-                }
-            ]
-        });
-
-        return NextResponse.json(result);
-
-    } catch (error: any) {
-        logger.error("AI Command Execution Error", { error: error.message });
-        return NextResponse.json({ error: "Command execution failed" }, { status: 500 });
+    if (!hasRole(ctx.role, "admin")) {
+        return NextResponse.json({ error: "FORBIDDEN" }, { status: 403 });
     }
+
+    let chatSession;
+    if (sessionId) {
+        chatSession = await (prisma as any).aIChatSession.findFirst({
+            where: {
+                id: sessionId,
+                organizationId: ctx.orgId,
+            },
+            select: { id: true },
+        });
+    } else {
+        chatSession = await (prisma as any).aIChatSession.findFirst({
+            where: { organizationId: ctx.orgId, scope },
+            select: { id: true },
+        });
+    }
+
+    if (!chatSession) {
+        chatSession = await (prisma as any).aIChatSession.create({
+            data: {
+                organizationId: ctx.orgId,
+                scope,
+                title: scope === "ceo" ? "CEO Room" : "Admin Room",
+                createdByUserId: ctx.userId,
+            },
+            select: { id: true },
+        });
+    }
+
+    const result = await CommandEngine.executeCommand(
+        ctx.orgId,
+        ctx.userId,
+        ctx.role,
+        command,
+        args,
+    );
+
+    await (prisma as any).aIChatMessage.createMany({
+        data: [
+            {
+                sessionId: chatSession.id,
+                organizationId: ctx.orgId,
+                role: "user",
+                content: `${command} ${args}`.trim(),
+                command,
+            },
+            {
+                sessionId: chatSession.id,
+                organizationId: ctx.orgId,
+                role: "assistant",
+                content: JSON.stringify(result),
+                command,
+                meta: { deterministic: true, cacheHit: result.meta.cached },
+            },
+        ],
+    });
+
+    return NextResponse.json(result);
 }
+
+export const POST = withApiLogging("/api/org/[slug]/ai/command", "POST", POSTHandler);

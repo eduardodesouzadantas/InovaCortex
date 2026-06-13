@@ -10,8 +10,11 @@ import { prisma } from "@/lib/prisma";
  */
 export async function routeInbound(contactId: string, orgId: string): Promise<string | null> {
     // 1. Fetch the Contact and any open conversation
-    const contact = await prisma.contact.findUnique({
-        where: { id: contactId },
+    const contact = await prisma.contact.findFirst({
+        where: {
+            id: contactId,
+            organizationId: orgId,
+        },
         include: {
             conversations: {
                 where: { status: "open" },

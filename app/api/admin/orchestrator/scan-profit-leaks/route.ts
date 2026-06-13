@@ -1,3 +1,4 @@
+import { withApiLogging } from "@/lib/logger";
 import { NextRequest, NextResponse } from "next/server";
 import {
     applyLegacyAdminApiDeprecationHeaders,
@@ -15,7 +16,7 @@ function respond(mode: "session" | "legacy_admin_token", body: unknown, init?: R
     });
 }
 
-export async function POST(request: NextRequest) {
+async function POSTHandler(request: NextRequest) {
     const redirectResponse = createLegacyAdminFinalRedirectResponse(request, {
         successorPath: "/api/agency/monitoring/orchestrator/scan-profit-leaks",
     });
@@ -54,3 +55,5 @@ export async function POST(request: NextRequest) {
         return respond(access.mode, { error: "Scan failed" }, { status: 500 });
     }
 }
+
+export const POST = withApiLogging("/api/admin/orchestrator/scan-profit-leaks", "POST", POSTHandler);

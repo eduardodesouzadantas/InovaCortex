@@ -11,6 +11,7 @@
 
 import { prisma } from "@/lib/prisma";
 import { logger } from "@/lib/logger";
+import { ensureOnboardingStatus } from "@/lib/onboarding-status";
 import {
     BASE_TASKS,
     MODULE_TASKS,
@@ -66,6 +67,7 @@ export async function provisionWorkspace(
     });
 
     logger.info("ClientWorkspace created", { workspaceId: workspace.id, orgId, modules });
+    void ensureOnboardingStatus(orgId).catch(() => undefined);
 
     // 2. Generate tasks
     const now = new Date();
@@ -75,6 +77,7 @@ export async function provisionWorkspace(
     ].sort((a, b) => a.orderIndex - b.orderIndex);
 
     const taskData = allTaskTemplates.map(t => ({
+        organizationId: orgId,
         workspaceId: workspace.id,
         title: t.title,
         description: t.description,
@@ -94,6 +97,7 @@ export async function provisionWorkspace(
     ];
 
     const checklistData = allChecklist.map(c => ({
+        organizationId: orgId,
         workspaceId: workspace.id,
         system: c.system,
         item: c.item,
@@ -128,9 +132,9 @@ export async function provisionWorkspace(
 
 // ─── Task Status Update ───────────────────────────────────────────────────────
 
-export async function updateTaskStatus(taskId: string, status: string): Promise<void> {
-    await (prisma as any).implementationTask.update({
-        where: { id: taskId },
+export async function updateTaskStatus(orgId: string, taskId: string, status: string): Promise<void> {
+    await (prisma as any).implementationTask.updateMany({
+        where: { id: taskId, organizationId: orgId },
         data: {
             status,
             doneAt: status === "done" ? new Date() : null,
@@ -175,9 +179,9 @@ export async function runNudgeChecks(orgId: string): Promise<{ alerts: number }>
     const threeDaysAgo = new Date(now.getTime() - 3 * 86400000);
     const blockedTasks = await (prisma as any).implementationTask.findMany({
         where: {
+            organizationId: orgId,
             status: "blocked",
             updatedAt: { not: { gte: threeDaysAgo } },
-            workspace: { organizationId: orgId },
         },
         include: { workspace: { select: { id: true, assessmentId: true } } },
     });

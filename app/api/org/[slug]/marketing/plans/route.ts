@@ -1,113 +1,116 @@
 /**
  * app/api/org/[slug]/marketing/plans/route.ts
- * V20.1: PATCH endpoint for MarketingPlan status mutations.
- *
- * Actions:
- *   review   → status: reviewed
- *   approve  → status: approved
- *   schedule → status: scheduled + scheduledFor = best hour today/tomorrow
- *   publish  → calls publishOne(planId) → status: posted | ready_to_post
+ * PATCH endpoint for MarketingPlan status mutations.
  */
 
-import { NextRequest, NextResponse } from "next/server";
 import { requireOrgContext } from "@/lib/auth/org-context";
+import {
+    assertTenantRole,
+    invalidTenantInputResponse,
+    resolveTenantRouteError,
+    tenantNotFoundResponse,
+} from "@/lib/auth/tenant-route";
 import { publishOne } from "@/lib/agents/publisher-agent";
+import { logger, withApiLogging } from "@/lib/logger";
 import { getBestSendHour } from "@/lib/services/deal-optimization/send-window";
-import { logger } from "@/lib/logger";
+import { NextRequest, NextResponse } from "next/server";
 
-interface Params { params: Promise<{ slug: string }> }
+interface Params {
+    params: Promise<{ slug: string }>;
+}
 
-export async function PATCH(req: NextRequest, { params }: Params) {
+async function PATCHHandler(req: NextRequest, { params }: Params) {
     const { slug } = await params;
-    let ctx;
-    try { ctx = await requireOrgContext(slug); }
-    catch { return NextResponse.json({ error: "Unauthorized" }, { status: 401 }); }
+    const ctx = await requireOrgContext(slug).catch((error) => error);
+    if (ctx instanceof Error) {
+        return resolveTenantRouteError(ctx, "Failed to resolve marketing plan context");
+    }
+    try {
+        assertTenantRole(ctx.role, "admin");
+    } catch (error) {
+        return resolveTenantRouteError(error, "Failed to authorize marketing plan update");
+    }
 
-    let body: { planId: string; action: string };
-    try { body = await req.json(); }
-    catch { return NextResponse.json({ error: "Invalid JSON" }, { status: 400 }); }
+    let body: { action?: string; planId?: string };
+    try {
+        body = await req.json();
+    } catch {
+        return invalidTenantInputResponse("Invalid JSON");
+    }
 
     const { planId, action } = body;
-    if (!planId || !action) return NextResponse.json({ error: "planId and action required" }, { status: 400 });
+    if (!planId || !action) {
+        return invalidTenantInputResponse("planId and action required");
+    }
 
     const { prisma } = await import("@/lib/prisma");
+    const plan = await prisma.marketingPlan.findFirst({
+        where: { id: planId, orgId: ctx.orgId },
+        select: { id: true, orgId: true, status: true },
+    });
 
-    // Verify plan belongs to correct org
-    const plan = await (prisma as any).marketingPlan.findUnique({
-        where: { id: planId },
-        select: { id: true, orgId: true, status: true, platform: true, day: true },
-    }).catch(() => null);
-
-    if (!plan) return NextResponse.json({ error: "Plan not found" }, { status: 404 });
-
-    if (ctx.orgId !== plan.orgId) {
-        return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+    if (!plan) {
+        return tenantNotFoundResponse("Plan not found");
     }
 
     try {
         switch (action) {
             case "review": {
-                if (!["draft"].includes(plan.status)) {
+                if (plan.status !== "draft") {
                     return NextResponse.json({ error: `Cannot review from status '${plan.status}'` }, { status: 422 });
                 }
-                await (prisma as any).marketingPlan.update({
+                await prisma.marketingPlan.update({
                     where: { id: planId },
                     data: { status: "reviewed" },
                 });
                 return NextResponse.json({ message: "Enviado para revisão", status: "reviewed" });
             }
-
             case "approve": {
                 if (!["draft", "reviewed"].includes(plan.status)) {
                     return NextResponse.json({ error: `Cannot approve from status '${plan.status}'` }, { status: 422 });
                 }
-                await (prisma as any).marketingPlan.update({
+                await prisma.marketingPlan.update({
                     where: { id: planId },
                     data: { status: "approved" },
                 });
                 return NextResponse.json({ message: "Post aprovado!", status: "approved" });
             }
-
             case "schedule": {
                 if (plan.status !== "approved") {
                     return NextResponse.json({ error: "Only approved plans can be scheduled" }, { status: 422 });
                 }
                 let bestHour = 10;
                 try {
-                    const sw = await getBestSendHour(plan.orgId);
-                    bestHour = sw.hour;
-                } catch { /* fallback 10 */ }
+                    const sendWindow = await getBestSendHour(plan.orgId);
+                    bestHour = sendWindow.hour;
+                } catch {
+                    bestHour = 10;
+                }
                 const now = new Date();
                 const scheduledFor = new Date();
                 scheduledFor.setHours(bestHour, 0, 0, 0);
-                // If best hour today already passed, schedule for tomorrow
                 if (scheduledFor <= now) {
                     scheduledFor.setDate(scheduledFor.getDate() + 1);
                 }
-                await (prisma as any).marketingPlan.update({
+                await prisma.marketingPlan.update({
                     where: { id: planId },
                     data: { status: "scheduled", scheduledFor },
                 });
-                const label = scheduledFor.toLocaleString("pt-BR", { hour: "2-digit", minute: "2-digit", day: "2-digit", month: "2-digit" });
-                return NextResponse.json({ message: `Agendado para ${label}`, status: "scheduled", scheduledFor });
+                return NextResponse.json({ message: "Agendado com sucesso", status: "scheduled", scheduledFor });
             }
-
             case "publish": {
                 const result = await publishOne(planId);
                 logger.info("[MarketingAPI] publishOne result", { planId, status: result.status });
-                const msg = result.status === "posted"
-                    ? "Publicado com sucesso! ✅"
-                    : result.status === "ready_to_post"
-                        ? "Pack pronto para publicação manual 📋"
-                        : `Status: ${result.status}`;
-                return NextResponse.json({ message: msg, status: result.status, stub: result.stub });
+                return NextResponse.json({ message: "Publicação processada", status: result.status, stub: result.stub });
             }
-
             default:
-                return NextResponse.json({ error: `Unknown action: ${action}` }, { status: 400 });
+                return invalidTenantInputResponse(`Unknown action: ${action}`);
         }
-    } catch (err: any) {
-        logger.error("[MarketingAPI] Mutation failed", { planId, action, error: err?.message });
-        return NextResponse.json({ error: err?.message ?? "Internal error" }, { status: 500 });
+    } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        logger.error("[MarketingAPI] Mutation failed", { planId, action, error: message });
+        return resolveTenantRouteError(error, "Failed to update marketing plan");
     }
 }
+
+export const PATCH = withApiLogging("/api/org/[slug]/marketing/plans", "PATCH", PATCHHandler);

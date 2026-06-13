@@ -14,6 +14,7 @@ import { createOpenAI } from "@ai-sdk/openai";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { logger } from "@/lib/logger";
+import { failedDependencyError } from "@/lib/http/route-errors";
 
 // ─── Output Schema (Zod) ────────────────────────────────────────────────────
 
@@ -115,11 +116,11 @@ export async function generatePreSalesArtifacts(
 ): Promise<PreSalesResult> {
     const apiKey = process.env.OPENAI_API_KEY;
     if (!apiKey) {
-        logger.warn("OPENAI_API_KEY not configured; using pre-sales stub output", {
+        logger.warn("OPENAI_API_KEY not configured for pre-sales generation", {
             assessmentId,
-            mode: "degraded",
+            mode: "failed_dependency",
         });
-        return buildStubPreSalesResult(context);
+        throw failedDependencyError();
     }
 
     // ─── Rate Limit Check ─────────────────────────────────────────────────

@@ -1,45 +1,60 @@
+import { withApiLogging } from "@/lib/logger";
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { requireOrgContext } from "@/lib/auth/org-context";
-import { assertRole } from "@/lib/auth/rbac";
+import {
+    assertTenantRole,
+    resolveTenantRouteError,
+} from "@/lib/auth/tenant-route";
 import { writeAuditEvent } from "@/lib/audit";
 import { syncMetaTemplatesForOrg } from "@/lib/whatsapp/meta-client";
+import { buildPaginationMeta, parsePagination } from "@/lib/http/pagination";
 
-function authErrorResponse(error: unknown) {
-    const message = error instanceof Error ? error.message : "";
-    if (message === "UNAUTHENTICATED") return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    if (message === "ORG_NOT_FOUND") return NextResponse.json({ error: "Organization not found" }, { status: 404 });
-    if (typeof message === "string" && message.startsWith("FORBIDDEN")) {
-        return NextResponse.json({ error: "Forbidden" }, { status: 403 });
-    }
-    return null;
-}
-
-export async function GET(
-    _request: Request,
+async function GETHandler(
+    request: Request,
     { params }: { params: Promise<{ slug: string }> },
 ) {
     try {
         const { orgId } = await requireOrgContext((await params).slug);
+        const pagination = parsePagination(new URL(request.url).searchParams, { defaultLimit: 50, maxLimit: 100 });
 
-        const templates = await prisma.whatsAppTemplate.findMany({
-            where: { organizationId: orgId },
-            orderBy: { name: "asc" },
-        });
+        const [total, templates] = await prisma.$transaction([
+            prisma.whatsAppTemplate.count({
+                where: { organizationId: orgId },
+            }),
+            prisma.whatsAppTemplate.findMany({
+                where: { organizationId: orgId },
+                select: {
+                    id: true,
+                    name: true,
+                    category: true,
+                    language: true,
+                    status: true,
+                    createdAt: true,
+                    updatedAt: true,
+                },
+                orderBy: { name: "asc" },
+                skip: pagination.skip,
+                take: pagination.limit,
+            }),
+        ]);
 
-        return NextResponse.json({ templates }, { status: 200 });
+        return NextResponse.json({
+            templates,
+            pagination: buildPaginationMeta({ ...pagination, total }),
+        }, { status: 200 });
     } catch (error) {
-        return authErrorResponse(error) ?? NextResponse.json({ error: "Internal Error" }, { status: 500 });
+        return resolveTenantRouteError(error, "Failed to load WhatsApp templates");
     }
 }
 
-export async function POST(
+async function POSTHandler(
     _request: Request,
     { params }: { params: Promise<{ slug: string }> },
 ) {
     try {
         const { orgId, role } = await requireOrgContext((await params).slug);
-        assertRole(role, "admin");
+        assertTenantRole(role, "admin");
 
         const syncResult = await syncMetaTemplatesForOrg(orgId);
         if (syncResult.source === "unconfigured") {
@@ -55,9 +70,8 @@ export async function POST(
             }, { status: 502 });
         }
 
-        let upserted = 0;
-        for (const template of syncResult.templates) {
-            await prisma.whatsAppTemplate.upsert({
+        const upserts = syncResult.templates.map((template) =>
+            prisma.whatsAppTemplate.upsert({
                 where: {
                     organizationId_name_language: {
                         organizationId: orgId,
@@ -78,9 +92,10 @@ export async function POST(
                     status: template.status,
                     bodyJson: template.bodyJson,
                 },
-            });
-            upserted += 1;
-        }
+            }),
+        );
+        await prisma.$transaction(upserts);
+        const upserted = upserts.length;
 
         await writeAuditEvent({
             organizationId: orgId,
@@ -99,6 +114,9 @@ export async function POST(
             upserted,
         }, { status: 200 });
     } catch (error) {
-        return authErrorResponse(error) ?? NextResponse.json({ error: "Internal Error" }, { status: 500 });
+        return resolveTenantRouteError(error, "Failed to sync WhatsApp templates");
     }
 }
+
+export const GET = withApiLogging("/api/org/[slug]/whatsapp/templates", "GET", GETHandler);
+export const POST = withApiLogging("/api/org/[slug]/whatsapp/templates", "POST", POSTHandler);

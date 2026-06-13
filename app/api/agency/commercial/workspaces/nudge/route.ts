@@ -1,10 +1,11 @@
+import { withApiLogging } from "@/lib/logger";
 import { NextRequest, NextResponse } from "next/server";
 import { requireAdminApiAccess } from "@/lib/auth/admin-api-guard";
 import { runWorkspaceNudgeHandler } from "@/lib/agency/commercial/workspaces";
 
 export const runtime = "nodejs";
 
-export async function POST(request: NextRequest) {
+async function POSTHandler(request: NextRequest) {
     const access = await requireAdminApiAccess(request, {
         requiredRole: "admin",
         allowLegacyTokenFallback: false,
@@ -18,3 +19,5 @@ export async function POST(request: NextRequest) {
 
     return runWorkspaceNudgeHandler(orgId, access.auth?.userId ?? undefined);
 }
+
+export const POST = withApiLogging("/api/agency/commercial/workspaces/nudge", "POST", POSTHandler);

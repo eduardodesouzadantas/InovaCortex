@@ -9,6 +9,18 @@ export interface GeneratePdfInput {
     reportId: string;
 }
 
+export interface PdfRendererHealth {
+    ready: boolean;
+    mode: "remote_browser" | "local_browser" | "text_fallback" | "unavailable";
+    detail?: string;
+    checkedAt: string;
+}
+
+const PDF_HEALTH_CACHE_TTL_MS = 5 * 60 * 1000;
+
+let pdfRendererHealthCache: PdfRendererHealth | null = null;
+let pdfRendererHealthPromise: Promise<PdfRendererHealth> | null = null;
+
 export async function generatePdfFromHtml(input: GeneratePdfInput): Promise<Buffer> {
     let browser: Browser | null = null;
     let remote = false;
@@ -63,6 +75,82 @@ export async function generatePDF(html: string): Promise<Buffer> {
         companyName: "InovaCortex",
         reportId: "business-mri",
     });
+}
+
+export async function checkPdfRendererHealth(): Promise<PdfRendererHealth> {
+    if (pdfRendererHealthCache) {
+        const checkedAtMs = new Date(pdfRendererHealthCache.checkedAt).getTime();
+        if (Date.now() - checkedAtMs < PDF_HEALTH_CACHE_TTL_MS) {
+            return pdfRendererHealthCache;
+        }
+    }
+
+    if (pdfRendererHealthPromise) {
+        return pdfRendererHealthPromise;
+    }
+
+    pdfRendererHealthPromise = (async () => {
+        let browser: Browser | null = null;
+        let remote = false;
+
+        try {
+            await preloadFonts();
+            const launched = await launchBrowser();
+            browser = launched.browser;
+            remote = launched.remote;
+
+            const page = await browser.newPage();
+            await page.setContent("<html><body><h1>system-health</h1></body></html>", { waitUntil: "domcontentloaded" });
+            const pdfBuffer = await page.pdf({
+                format: "A4",
+                printBackground: false,
+                margin: {
+                    top: "10mm",
+                    right: "10mm",
+                    bottom: "10mm",
+                    left: "10mm",
+                },
+            });
+
+            const result: PdfRendererHealth = {
+                ready: Buffer.byteLength(Buffer.from(pdfBuffer)) > 0,
+                mode: remote ? "remote_browser" : "local_browser",
+                checkedAt: new Date().toISOString(),
+            };
+            pdfRendererHealthCache = result;
+            return result;
+        } catch (error) {
+            const message = normalizeError(error);
+            const result: PdfRendererHealth = shouldFallback(message)
+                ? {
+                    ready: true,
+                    mode: "text_fallback",
+                    detail: message,
+                    checkedAt: new Date().toISOString(),
+                }
+                : {
+                    ready: false,
+                    mode: "unavailable",
+                    detail: message,
+                    checkedAt: new Date().toISOString(),
+                };
+
+            pdfRendererHealthCache = result;
+            return result;
+        } finally {
+            pdfRendererHealthPromise = null;
+
+            if (browser) {
+                if (remote) {
+                    browser.disconnect();
+                } else {
+                    await browser.close().catch(() => null);
+                }
+            }
+        }
+    })();
+
+    return pdfRendererHealthPromise;
 }
 
 async function launchBrowser(): Promise<{ browser: Browser; remote: boolean }> {

@@ -1,3 +1,4 @@
+import { withApiLogging } from "@/lib/logger";
 import { NextRequest, NextResponse } from "next/server";
 import { getSession } from "@/lib/auth/session";
 import {
@@ -13,7 +14,7 @@ export const runtime = "nodejs";
  * PATCH /api/admin/workspaces/[id]/tasks/[taskId]
  * Update a task's status (admin only).
  */
-export async function PATCH(
+async function PATCHHandler(
     request: NextRequest,
     { params }: { params: Promise<{ id: string; taskId: string }> },
 ) {
@@ -39,3 +40,5 @@ export async function PATCH(
         successorPath: `/api/agency/commercial/workspaces/${workspaceId}/tasks/${taskId}`,
     });
 }
+
+export const PATCH = withApiLogging("/api/admin/workspaces/[id]/tasks/[taskId]", "PATCH", PATCHHandler);

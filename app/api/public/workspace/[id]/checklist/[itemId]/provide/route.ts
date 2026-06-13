@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { logger } from "@/lib/logger";
+import { logger, withApiLogging } from "@/lib/logger";
 
 export const runtime = "nodejs";
 
@@ -14,7 +14,7 @@ export const runtime = "nodejs";
  *  - Enqueues integration_verify_needed ActionQueue item (priority +20)
  *  - Emits clientProvidedIntegrationData AuditEvent
  */
-export async function POST(
+async function POSTHandler(
     request: NextRequest,
     { params }: { params: Promise<{ id: string; itemId: string }> }
 ) {
@@ -32,7 +32,7 @@ export async function POST(
 
     // ── Find checklist item ────────────────────────────────────────────────────
     const item = await (prisma as any).integrationChecklistItem.findFirst({
-        where: { id: itemId, workspaceId },
+        where: { id: itemId, workspaceId, organizationId: workspace.organizationId },
     });
     if (!item) {
         return NextResponse.json({ error: "Item não encontrado." }, { status: 404 });
@@ -42,8 +42,8 @@ export async function POST(
     }
 
     // ── Update status ──────────────────────────────────────────────────────────
-    await (prisma as any).integrationChecklistItem.update({
-        where: { id: itemId },
+    await (prisma as any).integrationChecklistItem.updateMany({
+        where: { id: itemId, organizationId: workspace.organizationId },
         data: { status: "provided" },
     });
 
@@ -89,3 +89,5 @@ export async function POST(
 
     return NextResponse.json({ success: true, status: "provided" });
 }
+
+export const POST = withApiLogging("/api/public/workspace/[id]/checklist/[itemId]/provide", "POST", POSTHandler);

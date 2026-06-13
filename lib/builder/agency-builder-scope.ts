@@ -1,4 +1,5 @@
 import { getAgencyOrgSlug } from "@/lib/auth/session";
+import { tenantErrorResponse } from "@/lib/auth/tenant-route";
 
 function isTruthyFlag(value: string | undefined): boolean {
     if (!value) return false;
@@ -22,4 +23,11 @@ export function applyLegacyBuilderDeprecationHeaders(response: Response): Respon
     response.headers.set("Link", "</api/agency/builder>; rel=\"successor-version\"");
     response.headers.set("X-Inova-Legacy-Adapter", "builder-tenant-route");
     return response;
+}
+
+export function ensureLegacyBuilderSlug(slug: string): Response | null {
+    if (isAgencyBuilderSlug(slug)) return null;
+    return applyLegacyBuilderDeprecationHeaders(
+        tenantErrorResponse("FORBIDDEN", { message: "Builder moved to agency scope" }),
+    );
 }

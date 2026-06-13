@@ -1,8 +1,9 @@
+import { withApiLogging } from "@/lib/logger";
 import { NextRequest, NextResponse } from "next/server";
 import { requireAdminApiAccess } from "@/lib/auth/admin-api-guard";
 import { patchLeadHandler } from "@/lib/agency/commercial/leads";
 
-export async function PATCH(
+async function PATCHHandler(
     request: NextRequest,
     { params }: { params: Promise<{ id: string }> },
 ) {
@@ -17,3 +18,5 @@ export async function PATCH(
     const { id } = await params;
     return patchLeadHandler(request, id);
 }
+
+export const PATCH = withApiLogging("/api/agency/commercial/leads/[id]", "PATCH", PATCHHandler);

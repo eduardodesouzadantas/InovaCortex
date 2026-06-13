@@ -42,6 +42,7 @@ function toUserRecord(user: {
 
 export async function createOrganizationInitialUser(input: {
     organizationId: string;
+    name?: string | null;
     email: string;
     password: string;
     actorUserId: string;
@@ -49,6 +50,7 @@ export async function createOrganizationInitialUser(input: {
     source: "agency_surface";
 }): Promise<OrganizationUserBootstrapResult> {
     const normalizedEmail = input.email.trim().toLowerCase();
+    const normalizedName = input.name?.trim() || null;
 
     try {
         return await prisma.$transaction(async (tx) => {
@@ -88,6 +90,7 @@ export async function createOrganizationInitialUser(input: {
             const passwordHash = await hashPassword(input.password);
             const user = await tx.user.create({
                 data: {
+                    name: normalizedName,
                     email: normalizedEmail,
                     passwordHash,
                     role: "owner",
@@ -96,10 +99,12 @@ export async function createOrganizationInitialUser(input: {
                 },
                 select: {
                     id: true,
+                    name: true,
                     email: true,
                     role: true,
                     active: true,
                     createdAt: true,
+                    lastAccessAt: true,
                 },
             });
 
@@ -112,6 +117,7 @@ export async function createOrganizationInitialUser(input: {
                         organizationName: organization.name,
                         userId: user.id,
                         email: user.email,
+                        name: user.name,
                         role: user.role,
                         actorUserId: input.actorUserId,
                         actorRole: input.actorRole,
@@ -157,10 +163,12 @@ export async function updateOrganizationUserActive(input: {
                 },
                 select: {
                     id: true,
+                    name: true,
                     email: true,
                     role: true,
                     active: true,
                     createdAt: true,
+                    lastAccessAt: true,
                     organization: {
                         select: {
                             id: true,
@@ -190,10 +198,12 @@ export async function updateOrganizationUserActive(input: {
                 data: { active: input.nextActive },
                 select: {
                     id: true,
+                    name: true,
                     email: true,
                     role: true,
                     active: true,
                     createdAt: true,
+                    lastAccessAt: true,
                     organization: {
                         select: {
                             id: true,

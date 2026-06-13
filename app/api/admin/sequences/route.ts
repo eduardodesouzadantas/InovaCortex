@@ -11,7 +11,7 @@ import {
     markConverted,
     markOptedOut,
 } from "@/lib/funnel-sequence";
-import { logger } from "@/lib/logger";
+import { logger, withApiLogging } from "@/lib/logger";
 
 export const runtime = "nodejs";
 
@@ -20,7 +20,7 @@ export const runtime = "nodejs";
  * Trigger a new sequence for an assessment.
  * Body: { assessmentId, action?: "start" | "next" | "pause" | "resume" | "convert" | "optout" }
  */
-export async function POST(request: NextRequest) {
+async function POSTHandler(request: NextRequest) {
     const session = await getSession();
     if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
@@ -68,7 +68,7 @@ export async function POST(request: NextRequest) {
  * GET /api/admin/sequences
  * List all sequences for the org with conversion metrics.
  */
-export async function GET(request: NextRequest) {
+async function GETHandler(request: NextRequest) {
     const session = await getSession();
     if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
@@ -117,3 +117,6 @@ export async function GET(request: NextRequest) {
 
     return NextResponse.json({ sequences: enriched, total, metrics, page, totalPages: Math.ceil(total / take) });
 }
+
+export const POST = withApiLogging("/api/admin/sequences", "POST", POSTHandler);
+export const GET = withApiLogging("/api/admin/sequences", "GET", GETHandler);

@@ -1,15 +1,21 @@
+import { withApiLogging } from "@/lib/logger";
 import { NextRequest, NextResponse } from "next/server";
+import { orgContextErrorResponse, requireOrgContext } from "@/lib/auth/org-context";
+import { hasRole } from "@/lib/auth/rbac";
 import { prisma } from "@/lib/prisma";
 
-export async function PATCH(req: NextRequest, { params }: { params: Promise<{ slug: string, id: string }> }) {
+async function PATCHHandler(req: NextRequest, { params }: { params: Promise<{ slug: string, id: string }> }) {
     try {
-        const org = await prisma.organization.findUnique({ where: { slug: (await params).slug } });
-        if (!org) return NextResponse.json({ error: "Org not found" }, { status: 404 });
+        const { slug, id } = await params;
+        const { orgId, role } = await requireOrgContext(slug);
+        if (!hasRole(role, "admin")) {
+            return NextResponse.json({ error: "FORBIDDEN" }, { status: 403 });
+        }
 
         const { status, policyJson, trigger, approvalMode, tags } = await req.json();
 
         const pb = await prisma.playbook.updateMany({
-            where: { id: (await params).id, organizationId: org.id },
+            where: { id, organizationId: orgId },
             data: {
                 ...(status && { status }),
                 ...(policyJson && { policyJson }),
@@ -22,7 +28,12 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ sl
         if (pb.count === 0) return NextResponse.json({ error: "Playbook not found" }, { status: 404 });
 
         return NextResponse.json({ success: true });
-    } catch (error: any) {
-        return NextResponse.json({ error: String(error) }, { status: 500 });
+    } catch (error) {
+        if (error instanceof Error && ["UNAUTHENTICATED", "ORG_NOT_FOUND", "FORBIDDEN"].includes(error.message)) {
+            return orgContextErrorResponse(error);
+        }
+        return NextResponse.json({ error: "Failed to update playbook" }, { status: 500 });
     }
 }
+
+export const PATCH = withApiLogging("/api/org/[slug]/playbooks/[id]", "PATCH", PATCHHandler);

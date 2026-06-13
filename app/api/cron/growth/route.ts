@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server';
 import { discoverHighTicketLeads } from '@/lib/growth/lead-discovery';
 import { runOutboundAutopilot } from '@/lib/growth/outbound-autopilot';
 import { detectGrowthSignals } from '@/lib/growth/signal-engine';
-import { logger } from '@/lib/logger';
+import { logger, withApiLogging } from "@/lib/logger";
 import { prisma } from '@/lib/prisma';
 
 /**
@@ -10,7 +10,7 @@ import { prisma } from '@/lib/prisma';
  * Vercel Cron compatible endpoint. 
  * Runs the autonomous growth engine loop.
  */
-export async function GET(request: Request) {
+async function GETHandler(request: Request) {
     // Add simple header auth to prevent abuse
     const authHeader = request.headers.get('authorization');
     if (authHeader !== `Bearer ${process.env.CRON_SECRET}`) {
@@ -55,3 +55,5 @@ export async function GET(request: Request) {
         return NextResponse.json({ success: false, error: err.message }, { status: 500 });
     }
 }
+
+export const GET = withApiLogging("/api/cron/growth", "GET", GETHandler);

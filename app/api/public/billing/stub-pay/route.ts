@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { onPaymentConfirmed } from "@/lib/services/billing/on-payment-confirmed";
-import { logger } from "@/lib/logger";
+import { logger, withApiLogging } from "@/lib/logger";
 
 export const runtime = "nodejs";
 
@@ -12,7 +12,7 @@ export const runtime = "nodejs";
  *
  * Only active when STRIPE_SECRET_KEY is not set (or NEXT_PUBLIC_DEV_STUB=true).
  */
-export async function POST(request: NextRequest) {
+async function POSTHandler(request: NextRequest) {
     const isStubAllowed = !process.env.STRIPE_SECRET_KEY ||
         process.env.NEXT_PUBLIC_DEV_STUB === "true";
 
@@ -55,3 +55,5 @@ export async function POST(request: NextRequest) {
         return NextResponse.json({ error: err.message }, { status: 500 });
     }
 }
+
+export const POST = withApiLogging("/api/public/billing/stub-pay", "POST", POSTHandler);

@@ -1,11 +1,17 @@
+import { withApiLogging } from "@/lib/logger";
 
 import { NextResponse } from "next/server";
 import { requireOrgContext } from "@/lib/auth/org-context";
-import { assertRole } from "@/lib/auth/rbac";
+import {
+    assertTenantRole,
+    invalidTenantInputResponse,
+    resolveTenantRouteError,
+    tenantNotFoundResponse,
+} from "@/lib/auth/tenant-route";
 import { prisma } from "@/lib/prisma";
 import { logSystemEvent } from "@/lib/system-events";
 
-export async function PATCH(
+async function PATCHHandler(
     req: Request,
     { params }: { params: Promise<{ slug: string, workspaceId: string }> }
 ) {
@@ -13,15 +19,22 @@ export async function PATCH(
 
     try {
         const ctx = await requireOrgContext(slug);
-        assertRole(ctx.role, "owner");
+        assertTenantRole(ctx.role, "owner");
 
         const body = await req.json();
         const { active } = body;
+        const workspace = await prisma.clientWorkspace.findFirst({
+            where: { id: workspaceId, organizationId: ctx.orgId },
+            select: { id: true },
+        });
+        if (!workspace) {
+            return tenantNotFoundResponse("Client workspace not found");
+        }
 
         // Deactivate Client
         if (active === false) {
-            const updated = await (prisma as any).clientWorkspace.update({
-                where: { id: workspaceId, organizationId: ctx.orgId },
+            await prisma.clientWorkspace.update({
+                where: { id: workspaceId },
                 data: {
                     status: "disabled",
                     workspacePublicToken: crypto.randomUUID() // Revoke access
@@ -41,8 +54,8 @@ export async function PATCH(
 
         // Reactivate Client
         if (active === true) {
-            const updated = await (prisma as any).clientWorkspace.update({
-                where: { id: workspaceId, organizationId: ctx.orgId },
+            await prisma.clientWorkspace.update({
+                where: { id: workspaceId },
                 data: {
                     status: "active"
                 }
@@ -50,8 +63,10 @@ export async function PATCH(
             return NextResponse.json({ success: true, status: "active" });
         }
 
-        return NextResponse.json({ error: "Invalid request" }, { status: 400 });
-    } catch (err: any) {
-        return NextResponse.json({ error: err.message }, { status: 403 });
+        return invalidTenantInputResponse("Invalid request");
+    } catch (err) {
+        return resolveTenantRouteError(err, "Failed to update client workspace");
     }
 }
+
+export const PATCH = withApiLogging("/api/org/[slug]/admin/clients/[workspaceId]", "PATCH", PATCHHandler);

@@ -3,6 +3,8 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { markGoLive, runNudgeChecks, updateTaskStatus } from "@/lib/provisioning";
 import { logger } from "@/lib/logger";
+import { isTenantReady } from "@/lib/onboarding-status";
+import { getOrganizationAccountStatus, ORGANIZATION_BILLING_SUSPENDED_MESSAGE } from "@/lib/billing/account-status";
 
 export async function listWorkspacesHandler(orgId: string): Promise<NextResponse> {
     const workspaces = await (prisma as any).clientWorkspace.findMany({
@@ -58,16 +60,15 @@ export async function updateWorkspaceChecklistHandler(
     }
 
     const item = await (prisma as any).integrationChecklistItem.findFirst({
-        where: { id: itemId, workspaceId },
-        include: { workspace: { select: { organizationId: true } } },
+        where: { id: itemId, workspaceId, organizationId: orgId },
     });
 
-    if (!item || item.workspace.organizationId !== orgId) {
+    if (!item) {
         return NextResponse.json({ error: "Not found" }, { status: 404 });
     }
 
-    await (prisma as any).integrationChecklistItem.update({
-        where: { id: itemId },
+    await (prisma as any).integrationChecklistItem.updateMany({
+        where: { id: itemId, organizationId: orgId },
         data: { status, notes: notes ?? item.notes },
     });
 
@@ -81,6 +82,28 @@ export async function goLiveWorkspaceHandler(orgId: string, workspaceId: string)
 
     if (!workspace) {
         return NextResponse.json({ error: "Not found" }, { status: 404 });
+    }
+
+    if (await getOrganizationAccountStatus(orgId) === "suspended") {
+        return NextResponse.json(
+            {
+                error: "FORBIDDEN",
+                message: ORGANIZATION_BILLING_SUSPENDED_MESSAGE,
+            },
+            { status: 403 },
+        );
+    }
+
+    const readiness = await isTenantReady(orgId);
+    if (!readiness.ready) {
+        return NextResponse.json(
+            {
+                error: "TENANT_NOT_READY",
+                message: "O tenant ainda nao atingiu o minimo operacional para go-live.",
+                readiness,
+            },
+            { status: 409 },
+        );
     }
 
     await markGoLive(workspaceId, workspace.assessmentId, orgId);
@@ -99,15 +122,14 @@ export async function updateWorkspaceTaskHandler(
     }
 
     const task = await (prisma as any).implementationTask.findFirst({
-        where: { id: taskId, workspaceId },
-        include: { workspace: { select: { organizationId: true } } },
+        where: { id: taskId, workspaceId, organizationId: orgId },
     });
 
-    if (!task || task.workspace.organizationId !== orgId) {
+    if (!task) {
         return NextResponse.json({ error: "Not found" }, { status: 404 });
     }
 
-    await updateTaskStatus(taskId, status);
+    await updateTaskStatus(orgId, taskId, status);
     logger.info("Task status updated", { taskId, status, orgId });
 
     return NextResponse.json({ success: true, taskId, status });

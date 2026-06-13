@@ -1,7 +1,13 @@
-﻿import { NextResponse } from "next/server";
+import { withApiLogging } from "@/lib/logger";
+import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { requireOrgContext } from "@/lib/auth/org-context";
-import { assertRole } from "@/lib/auth/rbac";
+import {
+    assertTenantRole,
+    invalidTenantInputResponse,
+    resolveTenantRouteError,
+    tenantNotFoundResponse,
+} from "@/lib/auth/tenant-route";
 import { writeAuditEvent } from "@/lib/audit";
 import {
     enqueueCampaignExecutionJob,
@@ -12,16 +18,11 @@ import {
 } from "@/lib/whatsapp/engines/campaign-engine";
 
 type CampaignAction = "start" | "resume" | "pause" | "run_batch";
-
-function authErrorResponse(error: unknown) {
-    const message = error instanceof Error ? error.message : "";
-    if (message === "UNAUTHENTICATED") return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    if (message === "ORG_NOT_FOUND") return NextResponse.json({ error: "Organization not found" }, { status: 404 });
-    if (typeof message === "string" && message.startsWith("FORBIDDEN")) {
-        return NextResponse.json({ error: "Forbidden" }, { status: 403 });
-    }
-    return null;
-}
+type CampaignPatchBody = {
+    action?: CampaignAction;
+    batchLimit?: number;
+    maxBatches?: number;
+};
 
 function parseAction(value: unknown): CampaignAction | null {
     if (value === "start" || value === "resume" || value === "pause" || value === "run_batch") return value;
@@ -47,27 +48,36 @@ function campaignView(campaign: {
     };
 }
 
-export async function PATCH(
+async function PATCHHandler(
     request: Request,
     { params }: { params: Promise<{ slug: string; id: string }> },
 ) {
     try {
         const { slug, id: campaignId } = await params;
         const { orgId, role, userId } = await requireOrgContext(slug);
-        assertRole(role, "admin");
+        assertTenantRole(role, "admin");
 
-        const body = await request.json().catch(() => ({}));
+        const body = await request.json().catch(() => null) as CampaignPatchBody | null;
+        if (!body) {
+            return invalidTenantInputResponse("Invalid JSON");
+        }
         const action = parseAction(body.action);
         if (!action) {
-            return NextResponse.json({ error: "Invalid action. Allowed: start, resume, pause, run_batch" }, { status: 400 });
+            return invalidTenantInputResponse("Invalid action. Allowed: start, resume, pause, run_batch");
         }
 
         const campaign = await prisma.whatsAppCampaign.findFirst({
             where: { id: campaignId, organizationId: orgId },
-            include: { template: { select: { id: true, name: true, status: true, language: true } } },
+            select: {
+                id: true,
+                name: true,
+                status: true,
+                stats: true,
+                template: { select: { id: true, name: true, status: true, language: true } },
+            },
         });
         if (!campaign) {
-            return NextResponse.json({ error: "Campaign not found" }, { status: 404 });
+            return tenantNotFoundResponse("Campaign not found");
         }
 
         if (action === "pause") {
@@ -93,7 +103,12 @@ export async function PATCH(
                         nextBatchAt: null,
                     }),
                 },
-                include: { template: { select: { id: true, name: true, status: true, language: true } } },
+                select: {
+                    id: true,
+                    name: true,
+                    status: true,
+                    template: { select: { id: true, name: true, status: true, language: true } },
+                },
             });
 
             const summary = await getCampaignOperationalSummary(orgId, campaignId);
@@ -147,7 +162,12 @@ export async function PATCH(
                         failureReason: null,
                     }),
                 },
-                include: { template: { select: { id: true, name: true, status: true, language: true } } },
+                select: {
+                    id: true,
+                    name: true,
+                    status: true,
+                    template: { select: { id: true, name: true, status: true, language: true } },
+                },
             });
 
             const queue = await enqueueCampaignExecutionJob(orgId, campaignId, {
@@ -202,7 +222,12 @@ export async function PATCH(
 
         const refreshed = await prisma.whatsAppCampaign.findUnique({
             where: { id: campaignId },
-            include: { template: { select: { id: true, name: true, status: true, language: true } } },
+            select: {
+                id: true,
+                name: true,
+                status: true,
+                template: { select: { id: true, name: true, status: true, language: true } },
+            },
         });
 
         await writeAuditEvent({
@@ -234,6 +259,8 @@ export async function PATCH(
             },
         }, { status: 200 });
     } catch (error) {
-        return authErrorResponse(error) ?? NextResponse.json({ error: "Internal Error" }, { status: 500 });
+        return resolveTenantRouteError(error, "Failed to update campaign");
     }
 }
+
+export const PATCH = withApiLogging("/api/org/[slug]/whatsapp/campaigns/[id]", "PATCH", PATCHHandler);

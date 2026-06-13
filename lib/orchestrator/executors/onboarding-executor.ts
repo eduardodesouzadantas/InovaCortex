@@ -181,7 +181,7 @@ async function sendOnboardingReminder(
 
     // Only send if checklist is still incomplete
     const pendingItems = await (prisma as any).integrationChecklistItem.count({
-        where: { workspaceId, status: "pending" },
+        where: { workspaceId, organizationId: orgId, status: "pending" },
     });
 
     if (pendingItems === 0) {

@@ -179,6 +179,7 @@ export default async function AgencyOrganizationDetailPage({
                     organizationId={organization.id}
                     organizationName={organization.name}
                     users={organization.users}
+                    invites={organization.invites ?? []}
                     canManage={canManageOrganizations}
                 />
             </div>

@@ -4,6 +4,7 @@ const mockOrganizationFindUnique = jest.fn();
 const mockOrganizationUpdate = jest.fn();
 const mockClientWorkspaceFindMany = jest.fn();
 const mockUserFindMany = jest.fn();
+const mockUserInviteFindMany = jest.fn();
 const mockAuditEventCreate = jest.fn();
 const mockTransaction = jest.fn(async (callback: (tx: any) => Promise<any>) => callback({
     organization: {
@@ -15,6 +16,9 @@ const mockTransaction = jest.fn(async (callback: (tx: any) => Promise<any>) => c
     },
     user: {
         findMany: mockUserFindMany,
+    },
+    userInvite: {
+        findMany: mockUserInviteFindMany,
     },
     auditEvent: {
         create: mockAuditEventCreate,
@@ -34,6 +38,9 @@ jest.mock("../lib/prisma", () => ({
         },
         user: {
             findMany: mockUserFindMany,
+        },
+        userInvite: {
+            findMany: mockUserInviteFindMany,
         },
         auditEvent: {
             create: mockAuditEventCreate,
@@ -204,9 +211,11 @@ describe("organizationRepository", () => {
         mockUserFindMany.mockResolvedValue([
             {
                 id: "user-1",
+                name: "Admin Acme",
                 email: "admin@acme.com",
                 role: "admin",
                 createdAt: new Date("2026-03-16T10:05:00.000Z"),
+                lastAccessAt: new Date("2026-03-16T11:15:00.000Z"),
             },
         ]);
         mockClientWorkspaceFindMany.mockResolvedValue([
@@ -220,6 +229,19 @@ describe("organizationRepository", () => {
                 assessmentId: "assessment-1",
             },
         ]);
+        mockUserInviteFindMany.mockResolvedValue([
+            {
+                id: "invite-1",
+                organizationId: "org-1",
+                email: "invitee@acme.com",
+                role: "viewer",
+                expiresAt: new Date("2026-03-25T10:00:00.000Z"),
+                acceptedAt: null,
+                revokedAt: null,
+                createdByUserId: "agency-user-1",
+                createdAt: new Date("2026-03-24T10:00:00.000Z"),
+            },
+        ]);
 
         const result = await getOrganizationDetails("org-1");
 
@@ -228,8 +250,15 @@ describe("organizationRepository", () => {
         expect(result?.subscriptionStatusLabel).toBe("Trial");
         expect(result?.lifecycleStatus).toBe("active");
         expect(result?.users[0]).toEqual(expect.objectContaining({
+            name: "Admin Acme",
             email: "admin@acme.com",
             role: "admin",
+            lastAccessAt: "2026-03-16T11:15:00.000Z",
+        }));
+        expect(result?.invites[0]).toEqual(expect.objectContaining({
+            email: "invitee@acme.com",
+            role: "viewer",
+            status: "pending",
         }));
         expect(mockOrganizationFindUnique).toHaveBeenCalledWith(expect.objectContaining({
             where: { id: "org-1" },

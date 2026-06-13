@@ -32,6 +32,7 @@ async function POSTHandler(
     }
 
     const formData = await request.formData().catch(() => null);
+    const name = formData?.get("name");
     const email = formData?.get("email");
     const password = formData?.get("password");
     const { id } = await params;
@@ -48,6 +49,7 @@ async function POSTHandler(
 
     const result = await createOrganizationInitialUser({
         organizationId: id,
+        name: typeof name === "string" ? name : undefined,
         email,
         password,
         actorUserId: auth.userId,

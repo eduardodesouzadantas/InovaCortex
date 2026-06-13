@@ -1,0 +1,39 @@
+name: Email Sync Cron
+
+on:
+  schedule:
+    - cron: "*/15 * * * *"
+  workflow_dispatch:
+
+concurrency:
+  group: email-sync-cron-production
+  cancel-in-progress: false
+
+jobs:
+  trigger-email-sync:
+    runs-on: ubuntu-latest
+    env:
+      CRON_SECRET: ${{ secrets.CRON_SECRET }}
+      NEXT_PUBLIC_BASE_URL: ${{ secrets.NEXT_PUBLIC_BASE_URL }}
+    steps:
+      - name: Validate cron configuration
+        shell: bash
+        run: |
+          if [ -z "${CRON_SECRET}" ]; then
+            echo "CRON_SECRET is required for the email sync cron."
+            exit 1
+          fi
+
+          if [ -z "${NEXT_PUBLIC_BASE_URL}" ]; then
+            echo "NEXT_PUBLIC_BASE_URL is required for the email sync cron."
+            exit 1
+          fi
+
+      - name: Trigger email sync cron endpoint
+        shell: bash
+        run: |
+          base_url="${NEXT_PUBLIC_BASE_URL%/}"
+          curl --fail --silent --show-error \
+            --request GET \
+            --header "Authorization: Bearer ${CRON_SECRET}" \
+            "${base_url}/api/cron/email-sync"

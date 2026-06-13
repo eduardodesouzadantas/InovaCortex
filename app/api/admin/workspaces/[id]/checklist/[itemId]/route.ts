@@ -1,3 +1,4 @@
+import { withApiLogging } from "@/lib/logger";
 import { NextRequest, NextResponse } from "next/server";
 import { getSession } from "@/lib/auth/session";
 import {
@@ -10,7 +11,7 @@ import { updateWorkspaceChecklistHandler } from "@/lib/agency/commercial/workspa
 export const runtime = "nodejs";
 
 /** PATCH /api/admin/workspaces/[id]/checklist/[itemId] */
-export async function PATCH(
+async function PATCHHandler(
     request: NextRequest,
     { params }: { params: Promise<{ id: string; itemId: string }> },
 ) {
@@ -36,3 +37,5 @@ export async function PATCH(
         successorPath: `/api/agency/commercial/workspaces/${workspaceId}/checklist/${itemId}`,
     });
 }
+
+export const PATCH = withApiLogging("/api/admin/workspaces/[id]/checklist/[itemId]", "PATCH", PATCHHandler);

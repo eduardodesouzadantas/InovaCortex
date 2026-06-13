@@ -1,3 +1,4 @@
+import { withApiLogging } from "@/lib/logger";
 import { NextRequest, NextResponse } from "next/server";
 import { requireAdminApiAccess } from "@/lib/auth/admin-api-guard";
 import { sendAssessmentDossierWhatsApp } from "@/lib/whatsapp/assessment-send";
@@ -14,7 +15,7 @@ function applyLegacyWhatsAppSendDeprecationHeaders<T extends NextResponse>(respo
     return response;
 }
 
-export async function POST(request: NextRequest) {
+async function POSTHandler(request: NextRequest) {
     const access = await requireAdminApiAccess(request, {
         requiredRole: "closer",
         allowLegacyTokenFallback: false,
@@ -54,3 +55,5 @@ export async function POST(request: NextRequest) {
         NextResponse.json({ success: true, messageId: result.messageId }, { status: 200 }),
     );
 }
+
+export const POST = withApiLogging("/api/whatsapp/send", "POST", POSTHandler);

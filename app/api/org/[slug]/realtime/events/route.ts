@@ -1,85 +1,47 @@
+import { withApiLogging } from "@/lib/logger";
 import { NextRequest } from "next/server";
-import { prisma } from "@/lib/prisma";
 import { requireOrgContext } from "@/lib/auth/org-context";
-export const dynamic = "force-dynamic";
-export const maxDuration = 60; // Set route max duration for Vercel
+import { tenantContextErrorResponse } from "@/lib/auth/tenant-route";
+import { canOpenRealtimeConnection, createRealtimeEventStream } from "@/lib/realtime/event-stream";
 
-export async function GET(
+export const dynamic = "force-dynamic";
+export const maxDuration = 60;
+
+async function GETHandler(
     req: NextRequest,
-    { params }: { params: Promise<{ slug: string }> }
+    { params }: { params: Promise<{ slug: string }> },
 ) {
     const { slug } = await params;
 
-    // 1. Resolve Org and Auth
-    const org = await prisma.organization.findUnique({
-        where: { slug },
-    });
-
-    if (!org) {
-        return new Response(JSON.stringify({ error: "Org not found" }), { status: 404 });
-    }
-
-    // To secure the SSE stream, ensure the user requesting has valid admin/owner session
-    // Note: if checkAuth redirects or throws, wrap carefully.
     let auth;
     try {
         auth = await requireOrgContext(slug);
-    } catch (e) {
-        return new Response("Unauthorized", { status: 401 });
+    } catch (error) {
+        return tenantContextErrorResponse(error) ?? new Response("Unauthorized", { status: 401 });
     }
 
-    // 2. Setup Server-Sent Events stream
-    let lastPolledAt = new Date();
+    const limit = canOpenRealtimeConnection(auth.orgId);
+    if (!limit.ok) {
+        return new Response(JSON.stringify({
+            error: "Too many open realtime connections",
+            code: limit.reason === "org_limit" ? "ORG_CONNECTION_LIMIT" : "GLOBAL_CONNECTION_LIMIT",
+        }), {
+            status: 429,
+            headers: { "content-type": "application/json; charset=utf-8" },
+        });
+    }
 
-    const stream = new ReadableStream({
-        async start(controller) {
-            // Send an initial connected ping
-            controller.enqueue('event: connected\ndata: {"status": "ok"}\n\n');
+    const lastEventId = req.headers.get("last-event-id");
+    const stream = createRealtimeEventStream(auth.orgId, req.signal, lastEventId);
 
-            // Poll interval function
-            const pollEvents = async () => {
-                try {
-                    // Fetch any new events since the last tick
-                    const incomingEvents = await (prisma as any).systemEvent.findMany({
-                        where: {
-                            organizationId: org.id,
-                            createdAt: { gt: lastPolledAt },
-                        },
-                        orderBy: { createdAt: "asc" },
-                    });
-
-                    if (incomingEvents.length > 0) {
-                        // Update timestamp
-                        lastPolledAt = incomingEvents[incomingEvents.length - 1].createdAt;
-
-                        // Enqueue all newly found events
-                        for (const event of incomingEvents) {
-                            controller.enqueue(`data: ${JSON.stringify(event)}\n\n`);
-                        }
-                    }
-                } catch (err) {
-                    console.error("SSE Poll error", err);
-                    clearInterval(interval);
-                    controller.close();
-                }
-            };
-
-            const interval = setInterval(pollEvents, 2000); // Poll DB every 2s
-
-            // Close stream if client disconnects
-            req.signal.addEventListener("abort", () => {
-                clearInterval(interval);
-                controller.close();
-            });
-        },
-    });
-
-    // 3. Return as a stream
     return new Response(stream, {
         headers: {
             "Content-Type": "text/event-stream",
             "Cache-Control": "no-cache, no-transform",
             "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
         },
     });
 }
+
+export const GET = withApiLogging("/api/org/[slug]/realtime/events", "GET", GETHandler);

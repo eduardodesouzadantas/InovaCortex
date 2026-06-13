@@ -12,17 +12,28 @@ export interface TeamPerformance {
  * Calculates Team Performance metrics for the WhatsApp CSR OS dashboard.
  */
 export async function calculateTeamPerformance(orgId: string): Promise<TeamPerformance[]> {
-    // 1. Fetch conversations with assigned users
     const convos = await prisma.whatsAppConversation.findMany({
         where: { organizationId: orgId, assignedUserId: { not: null } },
-        include: { user: true }
+        select: {
+            id: true,
+            assignedUserId: true,
+            status: true,
+            user: {
+                select: {
+                    email: true,
+                },
+            },
+        },
     });
 
     const conversationIds = convos.map((c) => c.id);
     const messages = conversationIds.length === 0
         ? []
         : await prisma.whatsAppMessage.findMany({
-            where: { conversationId: { in: conversationIds } },
+            where: {
+                organizationId: orgId,
+                conversationId: { in: conversationIds },
+            },
             select: { conversationId: true, direction: true, createdAt: true },
             orderBy: { createdAt: "asc" }
         });
@@ -85,17 +96,17 @@ export async function calculateTeamPerformance(orgId: string): Promise<TeamPerfo
 }
 
 export async function calculateInboxStats(orgId: string) {
-    const total = await prisma.whatsAppConversation.count({
-        where: { organizationId: orgId }
-    });
-
-    const unassigned = await prisma.whatsAppConversation.count({
-        where: { organizationId: orgId, assignedUserId: null, status: "open" }
-    });
-
-    const breached = await prisma.whatsAppConversation.count({
-        where: { organizationId: orgId, status: "open", slaDueAt: { lt: new Date() } }
-    });
+    const [total, unassigned, breached] = await Promise.all([
+        prisma.whatsAppConversation.count({
+            where: { organizationId: orgId },
+        }),
+        prisma.whatsAppConversation.count({
+            where: { organizationId: orgId, assignedUserId: null, status: "open" },
+        }),
+        prisma.whatsAppConversation.count({
+            where: { organizationId: orgId, status: "open", slaDueAt: { lt: new Date() } },
+        }),
+    ]);
 
     return { total, unassigned, breached };
 }

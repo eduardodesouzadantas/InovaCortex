@@ -1,5 +1,6 @@
 import { runPlaybook } from "@/lib/playbooks/executor";
 import { prisma } from "@/lib/prisma";
+import { createSystemEvent } from "@/lib/system-events";
 import { sendWhatsAppMessage, sendWhatsAppTemplate } from "@/lib/whatsapp";
 import { AgentImplementation, OrchestratorContext } from "../types";
 import { PlaybookContext } from "@/lib/playbooks/registry";
@@ -73,16 +74,14 @@ export const PlaybookAgent: AgentImplementation = {
                 }
 
                 // Idempotency log
-                await prisma.systemEvent.create({
-                    data: {
-                        organizationId: ctx.orgId,
-                        type: "playbook_action_sent",
-                        severity: "info",
-                        entityType: "playbook_run",
-                        entityId: runId,
-                        payloadJson: JSON.stringify({ playbookId, runId, targetId: target.targetId, stepKey: step.stepKey }),
-                        dedupeKey: step.actionHash,
-                    },
+                await createSystemEvent({
+                    organizationId: ctx.orgId,
+                    type: "playbook_action_sent",
+                    severity: "info",
+                    entityType: "playbook_run",
+                    entityId: runId,
+                    payloadJson: JSON.stringify({ playbookId, runId, targetId: target.targetId, stepKey: step.stepKey }),
+                    dedupeKey: step.actionHash,
                 });
 
                 // Audit Trail

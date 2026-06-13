@@ -1,14 +1,13 @@
 import { NextResponse } from "next/server";
-import { prisma } from "@/lib/prisma";
 import { getBudgetStatus } from "@/lib/agentops/budget";
-import { getSession } from "@/lib/auth/session";
-import { logger } from "@/lib/logger";
+import { logger, withApiLogging } from "@/lib/logger";
+import { orgContextErrorResponse, requireOrgContext } from "@/lib/auth/org-context";
 
 /**
  * GET /api/org/[slug]/ai/budget
  * Returns the current daily token usage and limits for the organization.
  */
-export async function GET(
+async function GETHandler(
     request: Request,
     { params }: { params: Promise<{ slug: string }> }
 ) {
@@ -16,21 +15,10 @@ export async function GET(
         const { slug } = await params;
 
         // Auth check
-        const session = await getSession();
-        if (!session || session.orgSlug !== slug) {
-            return NextResponse.json({ error: "UNAUTHORIZED" }, { status: 401 });
-        }
+        const ctx = await requireOrgContext(slug).catch((error) => error);
+        if (ctx instanceof Error) return orgContextErrorResponse(ctx);
 
-        const org = await prisma.organization.findUnique({
-            where: { slug },
-            select: { id: true }
-        });
-
-        if (!org) {
-            return NextResponse.json({ error: "Org not found" }, { status: 404 });
-        }
-
-        const status = await getBudgetStatus(org.id);
+        const status = await getBudgetStatus(ctx.orgId);
         return NextResponse.json(status);
 
     } catch (error: any) {
@@ -38,3 +26,5 @@ export async function GET(
         return NextResponse.json({ error: "Failed to fetch budget status" }, { status: 500 });
     }
 }
+
+export const GET = withApiLogging("/api/org/[slug]/ai/budget", "GET", GETHandler);

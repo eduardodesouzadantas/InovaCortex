@@ -1,9 +1,23 @@
 import { openai } from "@ai-sdk/openai";
 import { embedMany } from "ai";
 import { createHash } from "crypto";
+import { allowStubEmbeddings } from "@/lib/env";
 import { logger } from "@/lib/logger";
 
 const EMBEDDING_MODEL = process.env.OPENAI_EMBEDDINGS_MODEL || "text-embedding-3-small";
+
+function parseStoredEmbedding(raw: string): number[] | null {
+    try {
+        const parsed = JSON.parse(raw) as unknown;
+        if (Array.isArray(parsed) && parsed.every((value) => typeof value === "number")) {
+            return parsed;
+        }
+    } catch {
+        return null;
+    }
+
+    return null;
+}
 
 /**
  * Semantic Embeddings Engine (V33)
@@ -21,19 +35,28 @@ export async function embedTextBatch(texts: string[], orgId?: string): Promise<n
 
     for (let i = 0; i < texts.length; i++) {
         const hash = getChunkHash(texts[i]);
-        const cached = await (prisma as any).knowledgeChunk.findFirst({
+        const cached = await prisma.knowledgeChunk.findFirst({
             where: {
                 chunkHash: hash,
-                embedding: { not: null }
+                embedding: { not: null },
             },
-            select: { embedding: true }
+            select: { embedding: true },
         });
 
         if (cached?.embedding) {
-            results[i] = cached.embedding as number[];
-        } else {
+            const parsedEmbedding = parseStoredEmbedding(cached.embedding);
+            if (parsedEmbedding) {
+                results[i] = parsedEmbedding;
+                continue;
+            }
+            logger.warn("Ignoring invalid cached embedding payload", { orgId, chunkHash: hash });
+        }
+
+        if (results[i] === null) {
             pendingIndices.push(i);
             pendingTexts.push(texts[i]);
+        } else {
+            continue;
         }
     }
 
@@ -44,7 +67,10 @@ export async function embedTextBatch(texts: string[], orgId?: string): Promise<n
     const apiKey = process.env.OPENAI_API_KEY;
 
     if (!apiKey || apiKey === "sk-stub") {
-        logger.warn("OpenAI API Key missing, using Stub Embeddings (LITE MODE)");
+        if (!allowStubEmbeddings()) {
+            throw new Error("OPENAI_EMBEDDINGS_UNAVAILABLE");
+        }
+        logger.warn("OpenAI API Key missing, using stub embeddings", { orgId, mode: "stub_embeddings" });
         newEmbeddings = pendingTexts.map(text => generateStubEmbedding(text));
     } else {
         try {
@@ -53,8 +79,12 @@ export async function embedTextBatch(texts: string[], orgId?: string): Promise<n
                 values: pendingTexts,
             });
             newEmbeddings = embeddings;
-        } catch (error: any) {
-            logger.error(`Embedding generation failed: ${error.message}. Falling back to stub.`);
+        } catch (error: unknown) {
+            const message = error instanceof Error ? error.message : String(error);
+            if (!allowStubEmbeddings()) {
+                throw new Error(`OPENAI_EMBEDDINGS_FAILED: ${message}`);
+            }
+            logger.error(`Embedding generation failed: ${message}. Falling back to stub.`);
             newEmbeddings = pendingTexts.map(text => generateStubEmbedding(text));
         }
     }

@@ -7,6 +7,7 @@
  */
 
 import { logger } from "@/lib/logger";
+import { allowIntegrationStubs } from "@/lib/env";
 
 const META_BASE = "https://graph.facebook.com/v19.0";
 const META_TOKEN = process.env.META_WHATSAPP_TOKEN;
@@ -20,6 +21,18 @@ export interface WASendResult {
     error?: string;
 }
 
+type WhatsAppApiResponse = {
+    messages?: Array<{ id?: string | null }>;
+    error?: { message?: string | null };
+};
+
+type WhatsAppTemplateComponent = {
+    type: string;
+    parameters?: unknown[];
+    sub_type?: string;
+    index?: number | string;
+};
+
 /**
  * Send a free-text WhatsApp message to a phone number.
  * @param to   E.164 format, e.g. "5511999998888"
@@ -30,8 +43,13 @@ export async function sendWhatsAppMessage(
     body: string,
 ): Promise<WASendResult> {
     if (!isWhatsAppEnabled) {
-        logger.warn("WhatsApp stub: message not sent (META_WHATSAPP_TOKEN not configured)", { to, bodyLength: body.length });
-        return { messageId: `stub_${Date.now()}`, stub: true };
+        const error = "WhatsApp integration is not configured";
+        if (!allowIntegrationStubs()) {
+            logger.error("WhatsApp send blocked: integration not configured", { to, bodyLength: body.length });
+            return { messageId: null, stub: false, error };
+        }
+        logger.warn("WhatsApp stub: message not sent (integration not configured)", { to, bodyLength: body.length });
+        return { messageId: `stub_${Date.now()}`, stub: true, error };
     }
 
     try {
@@ -50,7 +68,7 @@ export async function sendWhatsAppMessage(
             }),
         });
 
-        const json = await res.json() as any;
+        const json = await res.json() as WhatsAppApiResponse;
 
         if (!res.ok) {
             const errMsg = json.error?.message ?? `HTTP ${res.status}`;
@@ -80,11 +98,16 @@ export async function sendWhatsAppTemplate(
     to: string,
     templateName: string,
     language: string = "pt_BR",
-    components: any[] = [],
+    components: WhatsAppTemplateComponent[] = [],
 ): Promise<WASendResult> {
     if (!isWhatsAppEnabled) {
+        const error = "WhatsApp integration is not configured";
+        if (!allowIntegrationStubs()) {
+            logger.error("WhatsApp template blocked: integration not configured", { to, templateName });
+            return { messageId: null, stub: false, error };
+        }
         logger.warn("WhatsApp template stub", { to, templateName });
-        return { messageId: `stub_tmpl_${Date.now()}`, stub: true };
+        return { messageId: `stub_tmpl_${Date.now()}`, stub: true, error };
     }
 
     try {
@@ -102,7 +125,7 @@ export async function sendWhatsAppTemplate(
             }),
         });
 
-        const json = await res.json() as any;
+        const json = await res.json() as WhatsAppApiResponse;
         if (!res.ok) {
             return { messageId: null, stub: false, error: json.error?.message ?? `HTTP ${res.status}` };
         }

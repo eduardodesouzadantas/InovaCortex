@@ -1,9 +1,10 @@
+import { withApiLogging } from "@/lib/logger";
 import { NextRequest, NextResponse } from "next/server";
 import { requireAdminApiAccess } from "@/lib/auth/admin-api-guard";
 import { resolveTargetOrgId } from "@/lib/agency/target-org";
 import { buildExecutiveIntelligence } from "@/lib/agency/executive/intelligence-handler";
 
-export async function GET(request: NextRequest) {
+async function GETHandler(request: NextRequest) {
     const access = await requireAdminApiAccess(request, {
         requiredRole: "admin",
         allowLegacyTokenFallback: false,
@@ -28,3 +29,5 @@ export async function GET(request: NextRequest) {
         return NextResponse.json({ error: "Consolidated intelligence failed" }, { status: 500 });
     }
 }
+
+export const GET = withApiLogging("/api/agency/executive/intelligence", "GET", GETHandler);

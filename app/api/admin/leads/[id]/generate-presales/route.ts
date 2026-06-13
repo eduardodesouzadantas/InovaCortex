@@ -1,3 +1,4 @@
+import { withApiLogging } from "@/lib/logger";
 import { NextRequest, NextResponse } from "next/server";
 import {
     applyLegacyAdminApiDeprecationHeaders,
@@ -10,7 +11,7 @@ import { generatePresalesHandler, listPresalesHandler } from "@/lib/agency/comme
 export const runtime = "nodejs";
 export const maxDuration = 60;
 
-export async function POST(
+async function POSTHandler(
     request: NextRequest,
     { params }: { params: Promise<{ id: string }> },
 ) {
@@ -40,7 +41,7 @@ export async function POST(
     });
 }
 
-export async function GET(
+async function GETHandler(
     request: NextRequest,
     { params }: { params: Promise<{ id: string }> },
 ) {
@@ -63,3 +64,6 @@ export async function GET(
         mode: access.mode,
     });
 }
+
+export const POST = withApiLogging("/api/admin/leads/[id]/generate-presales", "POST", POSTHandler);
+export const GET = withApiLogging("/api/admin/leads/[id]/generate-presales", "GET", GETHandler);

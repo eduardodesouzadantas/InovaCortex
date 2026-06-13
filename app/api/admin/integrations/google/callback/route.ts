@@ -1,8 +1,9 @@
+import { withApiLogging } from "@/lib/logger";
 import { NextResponse } from "next/server";
 import { exchangeGoogleCode } from "@/lib/integrations/google-calendar";
 import { prisma } from "@/lib/prisma";
 
-export async function GET(req: Request) {
+async function GETHandler(req: Request) {
     const { searchParams } = new URL(req.url);
     const code = searchParams.get("code");
     const state = searchParams.get("state");
@@ -35,3 +36,5 @@ export async function GET(req: Request) {
     // Redirect to the integrations page after success
     return NextResponse.redirect(new URL(`/org/${orgSlug}/admin/integrations/google?connected=1`, req.url));
 }
+
+export const GET = withApiLogging("/api/admin/integrations/google/callback", "GET", GETHandler);

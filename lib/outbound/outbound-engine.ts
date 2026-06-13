@@ -20,12 +20,19 @@ import {
     type MessageContext,
 } from "./linkedin-templates";
 
+type ProspectStub = {
+    company: string;
+    companySize: string;
+    fullName: string;
+    industry: string;
+    linkedinUrl: string;
+    location: string;
+    title: string;
+};
+
 // ─── Stub prospect data ───────────────────────────────────────────────────────
 
-const STUB_PROSPECTS: Array<{
-    fullName: string; title: string; company: string;
-    industry: string; companySize: string; location: string; linkedinUrl: string;
-}> = [
+const STUB_PROSPECTS: ProspectStub[] = [
         { fullName: "Ana Beatriz Mendes", title: "Diretora Comercial", company: "Imóveis Prime SP", industry: "imobiliaria", companySize: "11-50", location: "São Paulo, SP", linkedinUrl: "https://linkedin.com/in/stub-ana-mendes" },
         { fullName: "Ricardo Fonseca", title: "Sócio-Fundador", company: "RF Consultoria", industry: "consultoria", companySize: "1-10", location: "Rio de Janeiro, RJ", linkedinUrl: "https://linkedin.com/in/stub-ricardo-fonseca" },
         { fullName: "Dra. Camila Torres", title: "Diretora Clínica", company: "Clínica Torres Saúde", industry: "clinica", companySize: "11-50", location: "Belo Horizonte, MG", linkedinUrl: "https://linkedin.com/in/stub-camila-torres" },
@@ -68,7 +75,7 @@ export async function recommendProspects(
 
     for (const stub of batch) {
         try {
-            const existing = await (prisma as any).prospect.findFirst({
+            const existing = await prisma.prospect.findFirst({
                 where: { orgId, linkedinUrl: stub.linkedinUrl },
                 select: { id: true },
             });
@@ -79,7 +86,7 @@ export async function recommendProspects(
                 continue;
             }
 
-            const p = await (prisma as any).prospect.create({
+            const p = await prisma.prospect.create({
                 data: { ...stub, orgId, source: "scrape_stub", status: "new" },
             });
             prospectIds.push(p.id);
@@ -99,21 +106,29 @@ export async function startOutboundSequence(
 ): Promise<{ sequenceId: string; stage: string }> {
     const { prisma } = await import("@/lib/prisma");
 
+    const prospect = await prisma.prospect.findFirst({
+        where: { id: prospectId, orgId },
+        select: { id: true },
+    });
+    if (!prospect) {
+        throw new Error("PROSPECT_NOT_FOUND");
+    }
+
     // Upsert (one active sequence per prospect)
-    const existing = await (prisma as any).outboundSequence.findUnique({
+    const existing = await prisma.outboundSequence.findUnique({
         where: { prospectId },
         select: { id: true, stage: true },
-    }).catch(() => null);
+    });
 
     if (existing) {
-        await (prisma as any).outboundSequence.update({
+        await prisma.outboundSequence.update({
             where: { id: existing.id },
             data: { paused: false, nextAt: new Date() },
         });
         return { sequenceId: existing.id, stage: existing.stage };
     }
 
-    const seq = await (prisma as any).outboundSequence.create({
+    const seq = await prisma.outboundSequence.create({
         data: { orgId, prospectId, stage: "connect_note", nextAt: new Date(), paused: false },
     });
 
@@ -130,17 +145,17 @@ export async function buildMessage(
 ): Promise<{ key: string; body: string }> {
     const { prisma } = await import("@/lib/prisma");
 
-    const prospect = await (prisma as any).prospect.findUnique({
-        where: { id: prospectId },
+    const prospect = await prisma.prospect.findFirst({
+        where: { id: prospectId, orgId },
         select: { fullName: true, company: true, title: true, industry: true },
     });
     if (!prospect) throw new Error(`Prospect not found: ${prospectId}`);
 
     // Load proof stat
-    const proofStats = await (prisma as any).proofStatSnapshot.findUnique({
+    const proofStats = await prisma.proofStatSnapshot.findUnique({
         where: { orgId },
         select: { avgPaybackMonths: true, avgHoursSaved: true, avgMonthlyEconomy: true, totalCases: true },
-    }).catch(() => null);
+    });
 
     let proofStat: string | undefined;
     if (proofStats?.avgPaybackMonths && proofStats.avgPaybackMonths > 0) {
@@ -150,18 +165,18 @@ export async function buildMessage(
     // For dm3: include deal one-pager link if available
     let dealLink: string | undefined;
     if (stage === "dm3") {
-        const asmt = await (prisma as any).assessment.findFirst({
+        const asmt = await prisma.assessment.findFirst({
             where: { organizationId: orgId, email: { contains: "@" } }, // latest assessment
             orderBy: { createdAt: "desc" },
             select: { id: true },
-        }).catch(() => null);
+        });
 
         if (asmt) {
-            const dp = await (prisma as any).dealPacket.findFirst({
+            const dp = await prisma.dealPacket.findFirst({
                 where: { orgId, assessmentId: asmt.id },
                 select: { execSlug: true },
                 orderBy: { createdAt: "desc" },
-            }).catch(() => null);
+            });
             if (dp) {
                 const base = getBaseUrl();
                 dealLink = `${base}/deal/${dp.execSlug}`;
@@ -189,8 +204,8 @@ export async function sendNextOutboundStep(
 ): Promise<{ sent: boolean; stage?: string; messageId?: string; reason?: string }> {
     const { prisma } = await import("@/lib/prisma");
 
-    const seq = await (prisma as any).outboundSequence.findUnique({
-        where: { id: sequenceId },
+    const seq = await prisma.outboundSequence.findFirst({
+        where: { id: sequenceId, orgId },
         include: {
             prospect: {
                 select: { id: true, status: true, orgId: true },
@@ -210,7 +225,7 @@ export async function sendNextOutboundStep(
     // Pause if prospect replied or booked meeting
     const stopStatuses = ["replied", "meeting", "lost", "do_not_contact"];
     if (stopStatuses.includes(seq.prospect.status)) {
-        await (prisma as any).outboundSequence.update({
+        await prisma.outboundSequence.update({
             where: { id: sequenceId },
             data: { paused: true, lastResult: "replied" },
         });
@@ -221,7 +236,7 @@ export async function sendNextOutboundStep(
     const { key, body } = await buildMessage(orgId, seq.prospectId, stage);
 
     // Create OutboundMessage (always stub)
-    const msg = await (prisma as any).outboundMessage.create({
+    const msg = await prisma.outboundMessage.create({
         data: {
             orgId, prospectId: seq.prospectId, sequenceId,
             stage, channel: "linkedin", templateKey: key,
@@ -234,7 +249,7 @@ export async function sendNextOutboundStep(
     const cooldownMs = STAGE_COOLDOWNS[stage] ?? 72 * 60 * 60 * 1000;
     const nextAt = new Date(now.getTime() + cooldownMs);
 
-    await (prisma as any).outboundSequence.update({
+    await prisma.outboundSequence.update({
         where: { id: sequenceId },
         data: {
             stage: ns === "done" ? "done" : ns,

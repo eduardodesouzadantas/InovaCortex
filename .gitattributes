@@ -1,0 +1,17 @@
+# InovaCortex line endings policy
+# Enforce LF endings for all text files to avoid Windows CRLF noise
+* text=auto eol=lf
+
+# Explicit typing for common formats
+*.ts text
+*.tsx text
+*.js text
+*.jsx text
+*.json text
+*.md text
+*.yaml text
+*.yml text
+*.css text
+*.html text
+*.sh text eol=lf
+*.bat text eol=crlf

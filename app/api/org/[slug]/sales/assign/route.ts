@@ -1,21 +1,17 @@
+import { withApiLogging } from "@/lib/logger";
 import { NextResponse } from "next/server";
-import { prisma } from "@/lib/prisma";
-import { getSession } from "@/lib/auth/session";
 import { assignLead, autoAssign } from "@/lib/sales/assignment-engine";
+import { orgContextErrorResponse, requireOrgContext } from "@/lib/auth/org-context";
 
-const getOrg = async (slug: string) =>
-    prisma.organization.findUnique({ where: { slug }, select: { id: true } });
-
-export async function POST(req: Request, { params }: { params: Promise<{ slug: string }> }) {
-    const session = await getSession();
-    if (!session || session.orgSlug !== (await params).slug) return NextResponse.json({ error: "UNAUTHORIZED" }, { status: 401 });
-    const org = await getOrg((await params).slug);
-    if (!org) return NextResponse.json({ error: "Not found" }, { status: 404 });
+async function POSTHandler(req: Request, { params }: { params: Promise<{ slug: string }> }) {
+    const { slug } = await params;
+    const ctx = await requireOrgContext(slug).catch((error) => error);
+    if (ctx instanceof Error) return orgContextErrorResponse(ctx);
 
     const { assessmentId, salesRepId, auto, classification } = await req.json();
 
     if (auto && classification) {
-        const result = await autoAssign({ assessmentId, orgId: org.id, classification });
+        const result = await autoAssign({ assessmentId, orgId: ctx.orgId, classification });
         return NextResponse.json({ assignment: result, mode: "auto" });
     }
 
@@ -23,6 +19,8 @@ export async function POST(req: Request, { params }: { params: Promise<{ slug: s
         return NextResponse.json({ error: "assessmentId and salesRepId required" }, { status: 400 });
     }
 
-    const assignment = await assignLead({ assessmentId, salesRepId, assignedByUserId: session.userId });
+    const assignment = await assignLead({ assessmentId, orgId: ctx.orgId, salesRepId, assignedByUserId: ctx.userId });
     return NextResponse.json({ assignment, mode: "manual" }, { status: 201 });
 }
+
+export const POST = withApiLogging("/api/org/[slug]/sales/assign", "POST", POSTHandler);

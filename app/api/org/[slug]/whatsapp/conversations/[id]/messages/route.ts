@@ -1,52 +1,43 @@
+import { withApiLogging } from "@/lib/logger";
 import { NextResponse } from "next/server";
-import { prisma } from "@/lib/prisma";
 import { requireOrgContext } from "@/lib/auth/org-context";
+import {
+    resolveTenantRouteError,
+    tenantErrorResponse,
+    tenantNotFoundResponse,
+} from "@/lib/auth/tenant-route";
+import { buildPaginationMeta } from "@/lib/http/pagination";
+import { listConversationMessages } from "@/lib/whatsapp/conversation-service";
 
-export async function GET(
+async function GETHandler(
     request: Request,
-    { params }: { params: Promise<{ slug: string, id: string }> }
+    { params }: { params: Promise<{ slug: string; id: string }> },
 ) {
     try {
-        const { orgId, role, userId } = await requireOrgContext((await params).slug);
-        const conversationId = (await params).id;
+        const { slug, id: conversationId } = await params;
+        const { orgId, role, userId } = await requireOrgContext(slug);
 
-        // 1. Verify existence and authorization
-        const convo = await prisma.whatsAppConversation.findUnique({
-            where: { id: conversationId }
+        const result = await listConversationMessages({
+            organizationId: orgId,
+            role,
+            userId,
+            conversationId,
+            searchParams: new URL(request.url).searchParams,
         });
 
-        if (!convo || convo.organizationId !== orgId) {
-            return NextResponse.json({ error: "Not Found" }, { status: 404 });
+        return NextResponse.json({
+            messages: result.messages,
+            pagination: buildPaginationMeta({ ...result.pagination, total: result.total }),
+        }, { status: 200 });
+    } catch (error) {
+        if (error instanceof Error && error.message === "CONVERSATION_NOT_FOUND") {
+            return tenantNotFoundResponse("Conversation not found");
         }
-
-        if (role === "closer" && convo.assignedUserId !== userId) {
-            return NextResponse.json({ error: "Access Denied" }, { status: 403 });
+        if (error instanceof Error && error.message.startsWith("FORBIDDEN")) {
+            return tenantErrorResponse("FORBIDDEN", { message: "Closer can only access assigned conversations" });
         }
-
-        // 2. Fetch Messages (paginate cursor if needed, keeping it simple for now)
-        const messages = await prisma.whatsAppMessage.findMany({
-            where: { conversationId: conversationId },
-            orderBy: { createdAt: "asc" }, // Oldest to newest
-            take: 200 // Max limit for full context
-        });
-
-        // 3. Mark as Read logically: Reset unreadCount to 0
-        if (convo.unreadCount > 0) {
-            await prisma.whatsAppConversation.update({
-                where: { id: conversationId },
-                data: { unreadCount: 0 }
-            });
-        }
-
-        return NextResponse.json({ messages }, { status: 200 });
-
-    } catch (e: any) {
-        if (e?.message === "UNAUTHENTICATED") return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-        if (e?.message === "ORG_NOT_FOUND") return NextResponse.json({ error: "Organization not found" }, { status: 404 });
-        if (typeof e?.message === "string" && e.message.startsWith("FORBIDDEN")) {
-            return NextResponse.json({ error: "Forbidden" }, { status: 403 });
-        }
-        console.error("GET /messages Error:", e);
-        return NextResponse.json({ error: "Internal Error" }, { status: 500 });
+        return resolveTenantRouteError(error, "Failed to load conversation messages");
     }
 }
+
+export const GET = withApiLogging("/api/org/[slug]/whatsapp/conversations/[id]/messages", "GET", GETHandler);

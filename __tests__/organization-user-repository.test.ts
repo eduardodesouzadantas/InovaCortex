@@ -67,10 +67,12 @@ describe("organizationUserRepository", () => {
         mockUserFindUnique.mockResolvedValue(null);
         mockUserCreate.mockResolvedValue({
             id: "user-1",
+            name: "Admin Acme",
             email: "admin@acme.com",
             role: "owner",
             active: true,
             createdAt: new Date("2026-03-22T10:00:00.000Z"),
+            lastAccessAt: null,
         });
         mockAuditEventCreate.mockResolvedValue({
             id: "audit-1",
@@ -78,6 +80,7 @@ describe("organizationUserRepository", () => {
 
         const result = await createOrganizationInitialUser({
             organizationId: "org-1",
+            name: "Admin Acme",
             email: "Admin@Acme.com",
             password: "initial-pass",
             actorUserId: "agency-user-1",
@@ -88,12 +91,14 @@ describe("organizationUserRepository", () => {
         expect(result.ok).toBe(true);
         if (!result.ok) throw new Error("expected success");
         expect(result.user).toEqual(expect.objectContaining({
+            name: "Admin Acme",
             email: "admin@acme.com",
             role: "owner",
             active: true,
         }));
         expect(mockUserCreate).toHaveBeenCalledWith(expect.objectContaining({
             data: expect.objectContaining({
+                name: "Admin Acme",
                 email: "admin@acme.com",
                 passwordHash: "hashed:initial-pass",
                 role: "owner",
@@ -133,10 +138,12 @@ describe("organizationUserRepository", () => {
     test("activates an organization user and records an audit event", async () => {
         mockUserFindFirst.mockResolvedValue({
             id: "user-1",
+            name: "Owner Acme",
             email: "owner@acme.com",
             role: "owner",
             active: false,
             createdAt: new Date("2026-03-22T10:00:00.000Z"),
+            lastAccessAt: new Date("2026-03-22T11:00:00.000Z"),
             organization: {
                 id: "org-1",
                 name: "Acme",
@@ -144,10 +151,12 @@ describe("organizationUserRepository", () => {
         });
         mockUserUpdate.mockResolvedValue({
             id: "user-1",
+            name: "Owner Acme",
             email: "owner@acme.com",
             role: "owner",
             active: true,
             createdAt: new Date("2026-03-22T10:00:00.000Z"),
+            lastAccessAt: new Date("2026-03-22T11:00:00.000Z"),
             organization: {
                 id: "org-1",
                 name: "Acme",
@@ -185,10 +194,12 @@ describe("organizationUserRepository", () => {
     test("deactivates an organization user and records an audit event", async () => {
         mockUserFindFirst.mockResolvedValue({
             id: "user-1",
+            name: "Owner Acme",
             email: "owner@acme.com",
             role: "owner",
             active: true,
             createdAt: new Date("2026-03-22T10:00:00.000Z"),
+            lastAccessAt: new Date("2026-03-22T11:00:00.000Z"),
             organization: {
                 id: "org-1",
                 name: "Acme",

@@ -4,8 +4,6 @@ import { useState, useEffect, useRef } from "react";
 import { useParams } from "next/navigation";
 import {
     User,
-    Phone,
-    ShieldCheck,
     Loader2,
     Check,
     CheckCheck,
@@ -14,9 +12,14 @@ import {
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import { ComposeBox } from "./compose-box";
+import { ConversationCommercialContext } from "./conversation-commercial-context";
 import { GUIDE_IDS } from "@/lib/help/guide-ids";
+import { readApiData } from "./api-envelope";
+import type { CrmEditableField, CrmPlaybookId } from "@/lib/operator/crm-workspace";
+import type { WhatsAppConversationCommercialContext } from "@/lib/whatsapp/conversation-service";
 
 interface ChatPaneProps {
+    slug?: string;
     conversation: {
         id: string;
         status: string;
@@ -36,27 +39,9 @@ interface ChatPaneProps {
 
 type ConversationAction = "close" | "reopen" | "block_contact";
 
-function parseTags(raw?: string | null): string[] {
-    if (!raw) return [];
-    try {
-        const parsed = JSON.parse(raw);
-        return Array.isArray(parsed) ? parsed.map((tag) => String(tag)) : [];
-    } catch {
-        return [];
-    }
-}
-
-function formatDistanceToNow(date: Date): string {
-    const diff = (new Date().getTime() - date.getTime()) / 1000;
-    if (diff < 60) return "agora";
-    if (diff < 3600) return `${Math.floor(diff / 60)} min atras`;
-    if (diff < 86400) return `${Math.floor(diff / 3600)}h atras`;
-    return `${Math.floor(diff / 86400)}d atras`;
-}
-
-export function ChatPane({ conversation, onConversationUpdated }: ChatPaneProps) {
+export function ChatPane({ slug: providedSlug, conversation, onConversationUpdated }: ChatPaneProps) {
     const params = useParams();
-    const slug = params.slug as string;
+    const slug = providedSlug ?? (params.slug as string);
     const conversationId = conversation?.id ?? null;
     const [messages, setMessages] = useState<Array<{
         id: string;
@@ -68,8 +53,14 @@ export function ChatPane({ conversation, onConversationUpdated }: ChatPaneProps)
     }>>([]);
     const [loading, setLoading] = useState(true);
     const [messagesRefreshTick, setMessagesRefreshTick] = useState(0);
+    const [contextRefreshTick, setContextRefreshTick] = useState(0);
     const [actionLoading, setActionLoading] = useState<ConversationAction | null>(null);
     const [actionError, setActionError] = useState<string | null>(null);
+    const [commercialContext, setCommercialContext] = useState<WhatsAppConversationCommercialContext | null>(null);
+    const [contextLoading, setContextLoading] = useState(false);
+    const [contextError, setContextError] = useState<string | null>(null);
+    const [commercialPendingKey, setCommercialPendingKey] = useState<string | null>(null);
+    const [commercialNotice, setCommercialNotice] = useState<{ tone: "positive" | "warning" | "critical"; message: string } | null>(null);
     const scrollRef = useRef<HTMLDivElement>(null);
 
     useEffect(() => {
@@ -79,7 +70,7 @@ export function ChatPane({ conversation, onConversationUpdated }: ChatPaneProps)
             setLoading(true);
             try {
                 const res = await fetch(`/api/org/${slug}/whatsapp/conversations/${conversationId}/messages`);
-                const data = await res.json();
+                const data = await readApiData<{ messages?: typeof messages }>(res, "Falha ao carregar mensagens");
                 setMessages(data.messages || []);
             } catch (err) {
                 console.error("Failed to fetch messages:", err);
@@ -99,11 +90,38 @@ export function ChatPane({ conversation, onConversationUpdated }: ChatPaneProps)
         }
     }, [messages]);
 
+    useEffect(() => {
+        if (!conversationId) return;
+
+        let active = true;
+        setContextLoading(true);
+        setContextError(null);
+
+        fetch(`/api/org/${slug}/whatsapp/conversations/${conversationId}/context`)
+            .then((response) => readApiData<WhatsAppConversationCommercialContext>(response, "Falha ao carregar contexto comercial"))
+            .then((data) => {
+                if (!active) return;
+                setCommercialContext(data);
+            })
+            .catch((error) => {
+                if (!active) return;
+                setCommercialContext(null);
+                setContextError(error instanceof Error ? error.message : "Falha ao carregar contexto comercial");
+            })
+            .finally(() => {
+                if (!active) return;
+                setContextLoading(false);
+            });
+
+        return () => {
+            active = false;
+        };
+    }, [slug, conversationId, contextRefreshTick]);
+
     if (!conversation) return null;
 
     const contact = conversation.contact;
     const isOutside24h = Boolean(conversation.isOutside24h);
-    const parsedTags = parseTags(contact.tags);
     const isBlockedContact = Boolean(contact.optedOutAt);
 
     async function runConversationAction(action: ConversationAction) {
@@ -123,12 +141,76 @@ export function ChatPane({ conversation, onConversationUpdated }: ChatPaneProps)
             }
 
             setMessagesRefreshTick((prev) => prev + 1);
+            setContextRefreshTick((prev) => prev + 1);
             onConversationUpdated?.();
         } catch (error) {
             const message = error instanceof Error ? error.message : "Falha ao executar acao";
             setActionError(message);
         } finally {
             setActionLoading(null);
+        }
+    }
+
+    async function runCommercialInlineAction(assessmentId: string, payload: { field: CrmEditableField; value: string }) {
+        const mutationKey = `${assessmentId}:${payload.field}`;
+        setCommercialPendingKey(mutationKey);
+        setCommercialNotice(null);
+
+        try {
+            const response = await fetch(`/api/org/${slug}/crm/records/${assessmentId}`, {
+                method: "PATCH",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify(payload),
+            });
+
+            await readApiData(response, "Falha ao atualizar contexto comercial");
+            setCommercialNotice({
+                tone: "positive",
+                message: "Contexto comercial atualizado.",
+            });
+            setContextRefreshTick((prev) => prev + 1);
+            onConversationUpdated?.();
+        } catch (error) {
+            setCommercialNotice({
+                tone: "critical",
+                message: error instanceof Error ? error.message : "Falha ao atualizar contexto comercial",
+            });
+        } finally {
+            setCommercialPendingKey(null);
+        }
+    }
+
+    async function runCommercialPlaybook(assessmentId: string, playbookId: CrmPlaybookId) {
+        setCommercialPendingKey(`playbook:${playbookId}`);
+        setCommercialNotice(null);
+
+        try {
+            const response = await fetch(`/api/org/${slug}/crm/playbooks`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    assessmentIds: [assessmentId],
+                    playbookId,
+                    sourceViewId: null,
+                }),
+            });
+
+            const result = await readApiData<{ successCount: number; failureCount: number }>(response, "Falha ao executar playbook comercial");
+            setCommercialNotice({
+                tone: result.failureCount > 0 ? "warning" : "positive",
+                message: result.failureCount > 0
+                    ? `${result.successCount} acao comercial aplicada e ${result.failureCount} falhou.`
+                    : "Playbook comercial executado com sucesso.",
+            });
+            setContextRefreshTick((prev) => prev + 1);
+            onConversationUpdated?.();
+        } catch (error) {
+            setCommercialNotice({
+                tone: "critical",
+                message: error instanceof Error ? error.message : "Falha ao executar playbook comercial",
+            });
+        } finally {
+            setCommercialPendingKey(null);
         }
     }
 
@@ -214,104 +296,33 @@ export function ChatPane({ conversation, onConversationUpdated }: ChatPaneProps)
 
                 <footer data-guide-id={GUIDE_IDS.wa_compose_box} className="p-4 shrink-0 bg-black/40 backdrop-blur-md border-t border-white/5 relative z-10">
                     <ComposeBox
+                        slug={slug}
                         conversationId={conversation.id}
                         isOutside24h={isOutside24h}
-                        onSent={() => setMessagesRefreshTick((prev) => prev + 1)}
+                        onSent={() => {
+                            setMessagesRefreshTick((prev) => prev + 1);
+                            setContextRefreshTick((prev) => prev + 1);
+                        }}
                     />
                 </footer>
             </div>
 
-            <div className="w-[300px] border-l border-white/5 bg-black/40 hidden xl:flex flex-col p-6 gap-8 shrink-0 overflow-y-auto">
-                <div className="flex flex-col items-center text-center gap-4">
-                    <div className="w-20 h-20 rounded-full bg-gradient-to-br from-gold/20 to-amber-600/20 border-2 border-gold/30 flex items-center justify-center text-gold shadow-2xl shadow-gold/10">
-                        <User className="w-10 h-10" />
-                    </div>
-                    <div>
-                        <h3 className="text-lg font-bold text-white/90">{contact.name || "Sem Nome"}</h3>
-                        <p className="text-sm text-white/40">{contact.phoneNumberE164}</p>
-                    </div>
-                    <div className="flex gap-2">
-                        <div className="px-3 py-1 rounded-full bg-gold/10 border border-gold/20 text-[10px] font-bold text-gold uppercase tracking-widest">
-                            {contact.lifecycle}
-                        </div>
-                        {isOutside24h && (
-                            <div className="px-3 py-1 rounded-full bg-red-500/10 border border-red-500/20 text-[10px] font-bold text-red-500 uppercase tracking-widest flex items-center gap-1">
-                                <ShieldCheck className="w-3 h-3" />
-                                Sessao Expirada
-                            </div>
-                        )}
-                    </div>
-                </div>
-
-                <div className="h-px bg-white/5" />
-
-                <div className="flex flex-col gap-4">
-                    <div className="flex items-center justify-between text-xs">
-                        <span className="text-white/30 flex items-center gap-2"><Clock className="w-4 h-4" /> Ultima msg</span>
-                        <span className="text-white/60">
-                            {contact.lastMessageAt ? formatDistanceToNow(new Date(contact.lastMessageAt)) : "-"}
-                        </span>
-                    </div>
-                    <div className="flex items-center justify-between text-xs">
-                        <span className="text-white/30 flex items-center gap-2"><Phone className="w-4 h-4" /> WhatsApp ID</span>
-                        <span className="text-white/60 font-mono">{contact.wa_id || "Nao mapeado"}</span>
-                    </div>
-                </div>
-
-                <div className="h-px bg-white/5" />
-
-                <div className="flex flex-col gap-3">
-                    <div className="flex items-center justify-between">
-                        <h4 className="text-[10px] font-bold uppercase tracking-widest text-white/40">Etiquetas</h4>
-                        <span className="text-[10px] text-white/30 uppercase tracking-widest">Somente leitura</span>
-                    </div>
-                    <div className="flex flex-wrap gap-2">
-                        {parsedTags.length > 0 ? (
-                            parsedTags.map((tag: string) => (
-                                <span key={tag} className="px-2 py-1 rounded-md bg-white/5 border border-white/10 text-[10px] text-white/60">
-                                    {tag}
-                                </span>
-                            ))
-                        ) : (
-                            <span className="text-[10px] text-white/20 italic">Nenhuma etiqueta definida</span>
-                        )}
-                    </div>
-                </div>
-
-                <div className="mt-auto flex flex-col gap-2">
-                    {conversation.status === "open" ? (
-                        <button
-                            onClick={() => runConversationAction("close")}
-                            disabled={Boolean(actionLoading)}
-                            className="w-full py-2.5 rounded-xl bg-white/5 border border-white/10 hover:bg-white/10 transition-all text-xs font-bold text-white/80 uppercase tracking-widest disabled:opacity-50"
-                        >
-                            {actionLoading === "close" ? "Fechando..." : "Fechar Conversa"}
-                        </button>
-                    ) : (
-                        <button
-                            onClick={() => runConversationAction("reopen")}
-                            disabled={Boolean(actionLoading) || isBlockedContact}
-                            className="w-full py-2.5 rounded-xl bg-white/5 border border-white/10 hover:bg-white/10 transition-all text-xs font-bold text-white/80 uppercase tracking-widest disabled:opacity-50"
-                        >
-                            {actionLoading === "reopen" ? "Reabrindo..." : "Reabrir Conversa"}
-                        </button>
-                    )}
-
-                    <button
-                        onClick={() => runConversationAction("block_contact")}
-                        disabled={Boolean(actionLoading) || isBlockedContact}
-                        className="w-full py-2.5 rounded-xl border border-red-500/30 text-red-400 hover:bg-red-500/10 transition-all text-[10px] font-bold uppercase tracking-widest disabled:opacity-40"
-                    >
-                        {isBlockedContact ? "Contato bloqueado" : actionLoading === "block_contact" ? "Bloqueando..." : "Bloquear Contato"}
-                    </button>
-
-                    {actionError && (
-                        <div className="rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-[10px] text-red-300">
-                            {actionError}
-                        </div>
-                    )}
-                </div>
-            </div>
+            <ConversationCommercialContext
+                context={commercialContext}
+                conversationStatus={conversation.status}
+                contact={contact}
+                isOutside24h={isOutside24h}
+                isBlockedContact={isBlockedContact}
+                actionLoading={actionLoading}
+                actionError={actionError}
+                commercialPendingKey={commercialPendingKey}
+                commercialNotice={commercialNotice}
+                contextLoading={contextLoading}
+                contextError={contextError}
+                onConversationAction={runConversationAction}
+                onCommercialInlineAction={runCommercialInlineAction}
+                onCommercialPlaybook={runCommercialPlaybook}
+            />
         </div>
     );
 }

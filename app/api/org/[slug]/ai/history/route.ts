@@ -1,14 +1,14 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { getSession } from "@/lib/auth/session";
 import { hasRole } from "@/lib/auth/rbac";
-import { logger } from "@/lib/logger";
+import { logger, withApiLogging } from "@/lib/logger";
+import { orgContextErrorResponse, requireOrgContext } from "@/lib/auth/org-context";
 
 /**
  * GET /api/org/[slug]/ai/history
  * Fetch session historical messages with Auth + RBAC.
  */
-export async function GET(
+async function GETHandler(
     request: Request,
     { params }: { params: Promise<{ slug: string }> }
 ) {
@@ -19,12 +19,10 @@ export async function GET(
         const limit = parseInt(searchParams.get("limit") || "50");
 
         // 1. Auth & RBAC Check
-        const session = await getSession();
-        if (!session || session.orgSlug !== slug) {
-            return NextResponse.json({ error: "UNAUTHORIZED" }, { status: 401 });
-        }
+        const ctx = await requireOrgContext(slug).catch((error) => error);
+        if (ctx instanceof Error) return orgContextErrorResponse(ctx);
 
-        if (!hasRole(session.role, "admin")) {
+        if (!hasRole(ctx.role, "admin")) {
             return NextResponse.json({ error: "FORBIDDEN" }, { status: 403 });
         }
 
@@ -34,7 +32,7 @@ export async function GET(
 
         // 2. Query History (role, content, createdAt)
         const messages = await (prisma as any).aIChatMessage.findMany({
-            where: { sessionId, organizationId: session.orgId },
+            where: { sessionId, organizationId: ctx.orgId },
             orderBy: { createdAt: "asc" },
             take: limit,
             select: {
@@ -51,3 +49,5 @@ export async function GET(
         return NextResponse.json({ error: "History retrieval failed" }, { status: 500 });
     }
 }
+
+export const GET = withApiLogging("/api/org/[slug]/ai/history", "GET", GETHandler);

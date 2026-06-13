@@ -43,7 +43,13 @@ function responseHeaders(headers: HeadersInit | undefined, requestId: string): H
 export function apiSuccess<T>(request: Request, data: T, init?: ResponseInitInput) {
     const requestId = init?.requestId ?? resolveRequestId(request);
     return NextResponse.json(
-        { success: true, data, requestId },
+        {
+            success: true,
+            data,
+            meta: {
+                requestId,
+            },
+        },
         { status: init?.status ?? 200, headers: responseHeaders(init?.headers, requestId) },
     );
 }
@@ -51,7 +57,12 @@ export function apiSuccess<T>(request: Request, data: T, init?: ResponseInitInpu
 export function apiError(request: Request, error: ApiErrorInput, init?: ResponseInitInput) {
     const requestId = init?.requestId ?? resolveRequestId(request);
     return NextResponse.json(
-        { success: false, error, requestId },
+        {
+            success: false,
+            error: error.message,
+            code: error.code,
+            ...(typeof error.details === "undefined" ? {} : { details: error.details }),
+        },
         { status: init?.status ?? 500, headers: responseHeaders(init?.headers, requestId) },
     );
 }

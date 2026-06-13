@@ -1,6 +1,13 @@
+import { withApiLogging } from "@/lib/logger";
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { requireOrgContext } from "@/lib/auth/org-context";
+import {
+    invalidTenantInputResponse,
+    resolveTenantRouteError,
+    tenantContextErrorResponse,
+    tenantNotFoundResponse,
+} from "@/lib/auth/tenant-route";
 import { writeAuditEvent } from "@/lib/audit";
 import {
     deriveSizeBand,
@@ -16,16 +23,6 @@ type SegmentQuery = {
     plan: string;
     timeWindow: MarketWindow;
 };
-
-function authErrorResponse(e: unknown) {
-    const message = e instanceof Error ? e.message : "";
-    if (message === "UNAUTHENTICATED") return NextResponse.json({ ok: false, error: "Unauthorized" }, { status: 401 });
-    if (message === "ORG_NOT_FOUND") return NextResponse.json({ ok: false, error: "Organization not found" }, { status: 404 });
-    if (typeof message === "string" && message.startsWith("FORBIDDEN")) {
-        return NextResponse.json({ ok: false, error: "Forbidden" }, { status: 403 });
-    }
-    return null;
-}
 
 async function findBestSegment(query: SegmentQuery) {
     const attempts = [
@@ -58,7 +55,7 @@ async function findBestSegment(query: SegmentQuery) {
  * - 200 { ok: true, insufficientData: false, segment, snapshot }
  * - 200 { ok: true, insufficientData: true, segment: null, snapshot: null, message }
  */
-export async function GET(
+async function GETHandler(
     request: Request,
     { params }: { params: Promise<{ slug: string }> }
 ) {
@@ -69,17 +66,14 @@ export async function GET(
         const windowRaw = (url.searchParams.get("window") || "30d").toLowerCase();
 
         if (!isValidMarketWindow(windowRaw)) {
-            return NextResponse.json(
-                { ok: false, error: "Invalid window. Allowed values: 7d, 30d, 90d" },
-                { status: 400 }
-            );
+            return invalidTenantInputResponse("Invalid window. Allowed values: 7d, 30d, 90d");
         }
 
         const org = await prisma.organization.findUnique({
             where: { id: orgId },
             select: { id: true, industry: true, maxUsers: true, plan: true }
         });
-        if (!org) return NextResponse.json({ ok: false, error: "Organization not found" }, { status: 404 });
+        if (!org) return tenantNotFoundResponse("Organization not found");
 
         const segmentQuery: SegmentQuery = {
             industry: normalizeIndustry(org.industry),
@@ -104,7 +98,7 @@ export async function GET(
         try {
             snapshot = JSON.parse(targetSegment.snapshots.metrics);
         } catch {
-            return NextResponse.json({ ok: false, error: "Benchmark snapshot is invalid" }, { status: 500 });
+            return resolveTenantRouteError(new Error("BENCHMARK_SNAPSHOT_INVALID"), "Benchmark snapshot is invalid");
         }
 
         await writeAuditEvent({
@@ -129,10 +123,12 @@ export async function GET(
             snapshot,
         });
     } catch (e: unknown) {
-        const authResponse = authErrorResponse(e);
+        const authResponse = tenantContextErrorResponse(e);
         if (authResponse) return authResponse;
 
         console.error("Market Intel GET Error:", e);
-        return NextResponse.json({ ok: false, error: "Failed to fetch benchmarks" }, { status: 500 });
+        return resolveTenantRouteError(e, "Failed to fetch benchmarks");
     }
 }
+
+export const GET = withApiLogging("/api/org/[slug]/market-intel/snapshots", "GET", GETHandler);

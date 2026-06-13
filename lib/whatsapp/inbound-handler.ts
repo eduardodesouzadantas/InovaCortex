@@ -1,197 +1,250 @@
-import crypto from "crypto";
-import { prisma } from "@/lib/prisma";
+import { getAgencyOrgSlug } from "@/lib/auth/session";
 import { logger } from "@/lib/logger";
+import { prisma } from "@/lib/prisma";
 import { routeWhatsAppMessage } from "@/lib/whatsapp/command-parser";
-import { resolveActor } from "@/lib/whatsapp/rbac";
+import {
+    getOrCreateWhatsAppCopilotSession,
+    mapSenderToTenantActor,
+} from "@/lib/whatsapp/context-service";
+import {
+    handleInboundWhatsAppMessage,
+    type InboundMessage,
+    type InboundWhatsAppMessageInput,
+} from "@/lib/whatsapp/inbound-pipeline";
+import { verifyMetaSignature as verifyMetaWebhookSignature } from "@/lib/webhooks/security";
 
-export interface InboundMessage {
-    from: string;          // E.164 sender phone
-    messageId: string;     // WAMID
-    text: string;          // Body text
-    timestamp: number;
+import type { InboundWhatsAppPipelineResult } from "./pipeline-contract";
+
+type MetaWebhookMessage = {
+    from?: string;
+    id?: string;
+    text?: { body?: string };
+    timestamp?: string;
+    type?: string;
+    [key: string]: unknown;
+};
+
+type MetaWebhookValue = {
+    contacts?: Array<{ profile?: { name?: string } }>;
+    messages?: MetaWebhookMessage[];
+    metadata?: { phone_number_id?: string };
+};
+
+type MetaWebhookBody = {
+    entry?: Array<{
+        changes?: Array<{
+            value?: MetaWebhookValue;
+        }>;
+    }>;
+    object?: string;
+};
+
+function isValidInboundMetaMessage(message: MetaWebhookMessage): message is MetaWebhookMessage & {
+    from: string;
+    id: string;
+    timestamp: string;
+} {
+    return typeof message.from === "string"
+        && typeof message.id === "string"
+        && typeof message.timestamp === "string";
 }
 
-/**
- * 1. Validate the X-Hub-Signature-256 header from Meta.
- *    Returns true if the signature matches the raw body.
- */
+function maskPhone(phone: string): string {
+    if (phone.length <= 4) return "****";
+    return `${"*".repeat(Math.max(0, phone.length - 4))}${phone.slice(-4)}`;
+}
+
+async function resolveDefaultInboundOrg() {
+    const preferredSlug = process.env.WHATSAPP_COPILOT_ORG_SLUG?.trim() || getAgencyOrgSlug();
+    return prisma.organization.findUnique({
+        where: { slug: preferredSlug },
+        select: { id: true, slug: true },
+    });
+}
+
 export function validateMetaSignature(rawBody: string, signature: string | null): boolean {
     const secret = process.env.META_APP_SECRET;
     if (!secret) {
         logger.error("CRITICAL: META_APP_SECRET not configured. Rejecting webhook to prevent spoofing.");
         return false;
     }
-
-    if (!signature?.startsWith("sha256=")) return false;
-
-    const expected = "sha256=" + crypto
-        .createHmac("sha256", secret)
-        .update(rawBody)
-        .digest("hex");
-
-    // Timing-safe comparison
-    try {
-        return crypto.timingSafeEqual(
-            Buffer.from(signature),
-            Buffer.from(expected)
-        );
-    } catch {
-        return false;
-    }
+    return verifyMetaWebhookSignature(rawBody, signature, secret);
 }
 
-/**
- * 2. Parse inbound messages from Meta payload.
- *    Returns an array of InboundMessage (text only).
- */
-export function parseInboundMessages(body: any): InboundMessage[] {
-    const messages: InboundMessage[] = [];
+export function parseInboundMessages(body: MetaWebhookBody): InboundMessage[] {
+    return normalizeMetaWebhookMessages(body).map((message) => ({
+        from: message.fromPhone,
+        messageId: message.messageId,
+        text: message.messageText,
+        timestamp: message.timestamp,
+        type: message.type,
+        profileName: message.profileName ?? undefined,
+        raw: message.raw,
+    }));
+}
 
-    for (const entry of body.entry || []) {
-        for (const change of entry.changes || []) {
-            const value = change.value;
-            for (const msg of value.messages || []) {
-                if (msg.type === "text" && msg.text?.body) {
-                    messages.push({
-                        from: msg.from,
-                        messageId: msg.id,
-                        text: msg.text.body,
-                        timestamp: parseInt(msg.timestamp, 10)
-                    });
+export function normalizeMetaWebhookMessages(body: MetaWebhookBody): InboundWhatsAppMessageInput[] {
+    const messages: InboundWhatsAppMessageInput[] = [];
+
+    for (const entry of body?.entry || []) {
+        for (const change of entry?.changes || []) {
+            const value = change?.value;
+            const phoneNumberId = value?.metadata?.phone_number_id;
+            const profileName = value?.contacts?.[0]?.profile?.name ?? null;
+
+            for (const msg of value?.messages || []) {
+                if (!isValidInboundMetaMessage(msg)) {
+                    continue;
                 }
+
+                const type = typeof msg.type === "string" ? msg.type : "text";
+                const messageText = type === "text" && msg.text?.body
+                    ? msg.text.body
+                    : `[${type} message]`;
+
+                messages.push({
+                    phoneNumberId: typeof phoneNumberId === "string" ? phoneNumberId : null,
+                    fromPhone: msg.from,
+                    profileName,
+                    messageId: msg.id,
+                    messageText,
+                    timestamp: Number.parseInt(msg.timestamp, 10),
+                    type,
+                    raw: msg,
+                });
             }
         }
     }
 
-    return messages;
+    return messages.filter((message) =>
+        typeof message.fromPhone === "string"
+        && message.fromPhone.length > 0
+        && typeof message.messageId === "string"
+        && message.messageId.length > 0
+        && Number.isFinite(message.timestamp)
+        && message.timestamp > 0,
+    );
 }
 
-/**
- * 3. Map sender phone → organization + user identity.
- *
- * Strategy (in priority order):
- *   a) DB: WhatsAppUser table (RBAC — primary)
- *   b) DB: User.phone lookup (legacy)
- *   c) Env allowlist fallback
- *   d) Reject
- */
 export async function mapSenderToOrg(phone: string): Promise<{
     orgId: string;
     orgSlug: string;
     userId: string;
     role: string;
 } | null> {
-    // Strategy (a): WhatsAppUser RBAC table — primary source of truth
-    const actor = await resolveActor(phone);
-    if (actor) {
-        return {
-            orgId: actor.orgId,
-            orgSlug: actor.orgSlug,
-            userId: actor.userId || "system",
-            role: actor.role
-        };
+    const actor = await mapSenderToTenantActor(phone);
+    if (!actor) {
+        return null;
     }
 
-    // Strategy (b): env allowlist (backward compat)
-    const allowedPhones = process.env.WHATSAPP_COPILOT_PHONES
-        ?.split(",").map(p => p.trim()).filter(Boolean) || [];
-    const orgSlug = process.env.WHATSAPP_COPILOT_ORG_SLUG;
-
-    if (allowedPhones.includes(phone) && orgSlug) {
-        const org = await prisma.organization.findUnique({
-            where: { slug: orgSlug },
-            select: { id: true, slug: true }
-        });
-        if (!org) return null;
-
-        const adminUser = await (prisma as any).user.findFirst({
-            where: { organizationId: org.id, role: { in: ["owner", "admin"] } },
-            orderBy: { createdAt: "asc" }
-        });
-
-        return {
-            orgId: org.id,
-            orgSlug: org.slug,
-            userId: adminUser?.id || "system",
-            role: adminUser?.role || "admin"
-        };
-    }
-
-    return null;
+    return actor;
 }
 
-/**
- * 4. Main handler: validate → parse → map → dispatch to AI Copilot.
- */
+export { handleInboundWhatsAppMessage };
+export type {
+    InboundMessage,
+    InboundWhatsAppMessageInput,
+    InboundWhatsAppPipelineResult as HandleInboundWhatsAppMessageResult,
+};
+
 export async function handleInbound(rawBody: string, signature: string | null) {
-    // Step 1: Validate signature
     if (!validateMetaSignature(rawBody, signature)) {
-        logger.error("WhatsApp Webhook: invalid signature — request rejected");
-        return { ok: false, reason: "invalid_signature" };
+        logger.error("WhatsApp Webhook: invalid signature - request rejected");
+        return { ok: false, reason: "invalid_signature" as const };
     }
 
-    let body: any;
+    let body: MetaWebhookBody;
     try {
-        body = JSON.parse(rawBody);
+        body = JSON.parse(rawBody) as MetaWebhookBody;
     } catch {
-        return { ok: false, reason: "invalid_json" };
+        return { ok: false, reason: "invalid_json" as const };
     }
 
     if (body.object !== "whatsapp_business_account") {
-        return { ok: true, reason: "not_a_whatsapp_event" };
+        return { ok: true, reason: "not_a_whatsapp_event" as const };
     }
 
-    // Step 2: Parse messages
-    const messages = parseInboundMessages(body);
+    const messages = normalizeMetaWebhookMessages(body);
+    const fallbackOrg = await resolveDefaultInboundOrg();
+    let dispatched = 0;
 
-    // Step 3: Map each sender and dispatch
-    for (const msg of messages) {
-        const ctx = await mapSenderToOrg(msg.from);
+    for (const message of messages) {
+        const actorCtx = await mapSenderToTenantActor(message.fromPhone);
+        const inboundOrg = actorCtx
+            ? { organizationId: actorCtx.orgId, orgSlug: actorCtx.orgSlug }
+            : fallbackOrg
+                ? { organizationId: fallbackOrg.id, orgSlug: fallbackOrg.slug }
+                : null;
 
-        if (!ctx) {
-            logger.warn(`WhatsApp Copilot: unauthorized sender ${msg.from}`);
-            const { sendWhatsAppMessage } = await import("@/lib/whatsapp");
-            await sendWhatsAppMessage(
-                msg.from,
-                "❌ Número não autorizado. Contate seu administrador InovaCortex."
-            ).catch(() => { });
+        if (!inboundOrg) {
+            logger.warn("WhatsApp inbound dropped: organization not resolved", {
+                sender: maskPhone(message.fromPhone),
+                messageId: message.messageId,
+            });
             continue;
         }
 
-        // Resolve or create WhatsApp session
-        const sessionId = await getOrCreateSession(ctx.orgId, msg.from);
+        const persisted = await handleInboundWhatsAppMessage({
+            phoneNumberId: message.phoneNumberId,
+            fromPhone: message.fromPhone,
+            profileName: message.profileName,
+            messageId: message.messageId,
+            messageText: message.messageText,
+            timestamp: message.timestamp,
+            type: message.type,
+            raw: message.raw,
+        }, {
+            organizationId: inboundOrg.organizationId,
+            orgSlug: inboundOrg.orgSlug,
+            dispatchCopilot: false,
+        });
 
-        // Dispatch to CommandParser → CommandEngine / ChatEngine (fire-and-forget)
+        if (!actorCtx) {
+            logger.info("WhatsApp inbound stored without automation dispatch", {
+                organizationId: persisted.tenant.organizationId,
+                orgSlug: persisted.tenant.orgSlug,
+                contactId: persisted.contact.id,
+                conversationId: persisted.conversation.id,
+                messageId: persisted.message.externalMessageId,
+                dealId: persisted.deal.dealId,
+                pipelineId: persisted.deal.pipelineId,
+                stageId: persisted.deal.stageId,
+                activityIds: persisted.deal.activityIds,
+                sender: maskPhone(message.fromPhone),
+            });
+            dispatched += 1;
+            continue;
+        }
+
+        const sessionId = await getOrCreateWhatsAppCopilotSession(actorCtx.orgId, message.fromPhone);
         routeWhatsAppMessage({
-            from: msg.from,
-            text: msg.text,
-            orgId: ctx.orgId,
-            userId: ctx.userId,
-            role: ctx.role,
-            sessionId
-        }).catch(err =>
-            logger.error(`Router error for ${msg.from}: ${err.message}`)
-        );
+            from: message.fromPhone,
+            text: message.messageText,
+            orgId: actorCtx.orgId,
+            userId: actorCtx.userId,
+            role: actorCtx.role,
+            sessionId,
+        }).catch((error: Error) => {
+            logger.error("Router error for WhatsApp inbound", {
+                sender: maskPhone(message.fromPhone),
+                error: error.message,
+            });
+        });
 
-        logger.info(`Dispatched: [${ctx.orgSlug}] ${msg.from} → "${msg.text.slice(0, 40)}"`);
+        logger.info("WhatsApp inbound dispatched", {
+            organizationId: persisted.tenant.organizationId,
+            orgSlug: persisted.tenant.orgSlug,
+            contactId: persisted.contact.id,
+            conversationId: persisted.conversation.id,
+            messageId: persisted.message.externalMessageId,
+            dealId: persisted.deal.dealId,
+            pipelineId: persisted.deal.pipelineId,
+            stageId: persisted.deal.stageId,
+            activityIds: persisted.deal.activityIds,
+            sender: maskPhone(message.fromPhone),
+        });
+        dispatched += 1;
     }
 
-    return { ok: true, dispatched: messages.length };
-}
-
-// ─── Session Helper ───────────────────────────────────────────────────────────
-
-async function getOrCreateSession(orgId: string, phone: string): Promise<string> {
-    const tag = `wa_${phone}`;
-    const existing = await (prisma as any).aIChatSession.findFirst({
-        where: { organizationId: orgId, title: tag },
-        orderBy: { updatedAt: "desc" },
-        select: { id: true }
-    });
-    if (existing) return existing.id;
-
-    const session = await (prisma as any).aIChatSession.create({
-        data: { organizationId: orgId, title: tag, mode: "whatsapp_copilot" }
-    });
-    return session.id;
+    return { ok: true, dispatched };
 }

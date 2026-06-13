@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getStripeClient, STRIPE_PLANS, isStripeEnabled } from "@/lib/stripe";
 import { getSession } from "@/lib/auth/session";
-import { logger } from "@/lib/logger";
+import { logger, withApiLogging } from "@/lib/logger";
 import { getBaseUrl } from "@/lib/runtime/base-url";
 
 export const runtime = "nodejs";
@@ -12,7 +12,7 @@ export const runtime = "nodejs";
  * Creates a Stripe Checkout session for plan upgrade.
  * In stub mode, returns a clear message to configure Stripe.
  */
-export async function POST(request: NextRequest) {
+async function POSTHandler(request: NextRequest) {
     const session = await getSession();
     if (!session) {
         return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
@@ -66,3 +66,5 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json({ url: checkoutSession.url });
 }
+
+export const POST = withApiLogging("/api/stripe/create-checkout-session", "POST", POSTHandler);

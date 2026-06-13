@@ -2,8 +2,8 @@
 const config = {
     preset: "ts-jest",
     testEnvironment: "node",
-    testMatch: ["<rootDir>/__tests__/**/*.test.ts"],
-    testPathIgnorePatterns: ["<rootDir>/node_modules/", "<rootDir>/lib/"],
+    testMatch: ["<rootDir>/__tests__/**/*.test.ts", "<rootDir>/__tests__/**/*.test.tsx"],
+    testPathIgnorePatterns: ["<rootDir>/node_modules/", "<rootDir>/.next/", "<rootDir>/lib/"],
     moduleNameMapper: {
         "^@/(.*)$": "<rootDir>/$1",
     },

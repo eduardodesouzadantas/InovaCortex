@@ -1,22 +1,39 @@
-import { PrismaClient } from '@prisma/client'
-const prisma = new PrismaClient()
+import { PrismaClient } from "@prisma/client";
+
+const prisma = new PrismaClient();
 
 async function main() {
     const latestAssessment = await prisma.assessment.findFirst({
-        orderBy: { createdAt: 'desc' }
-    })
-    console.log("Latest Assessment:", latestAssessment?.name, latestAssessment?.phone, latestAssessment?.whatsappConsent);
+        orderBy: { createdAt: "desc" },
+        select: {
+            id: true,
+            name: true,
+            phone: true,
+            whatsappConsent: true,
+        },
+    });
 
-    if (latestAssessment) {
-        try {
-            const logs = await (prisma as any).messageLog.findMany({
-                where: { assessmentId: latestAssessment.id }
-            })
-            console.log("Message Logs for Assessment:");
-            console.dir(logs, { depth: null });
-        } catch (e) {
-            console.log("MessageLog check failed:", e);
-        }
+    console.log(
+        "Latest Assessment:",
+        latestAssessment?.name,
+        latestAssessment?.phone,
+        latestAssessment?.whatsappConsent,
+    );
+
+    if (!latestAssessment) return;
+
+    try {
+        const logs = await prisma.messageLog.findMany({
+            where: { assessmentId: latestAssessment.id },
+        });
+
+        console.log("Message Logs for Assessment:");
+        console.dir(logs, { depth: null });
+    } catch (error: unknown) {
+        console.log("MessageLog check failed:", error);
     }
 }
-main().catch(console.error).finally(() => prisma.$disconnect());
+
+main()
+    .catch(console.error)
+    .finally(() => prisma.$disconnect());

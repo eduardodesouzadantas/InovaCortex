@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { logger } from "@/lib/logger";
+import { logger, withApiLogging } from "@/lib/logger";
 
 export const runtime = "nodejs";
 
@@ -9,7 +9,7 @@ export const runtime = "nodejs";
  * Signs a contract with name + email (simple electronic signature, v1).
  * Returns { checkoutUrl } from the linked BillingRecord.
  */
-export async function PATCH(
+async function PATCHHandler(
     request: NextRequest,
     { params }: { params: Promise<{ slug: string }> }
 ) {
@@ -77,3 +77,5 @@ export async function PATCH(
         checkoutUrl: billing?.checkoutUrl ?? null,
     });
 }
+
+export const PATCH = withApiLogging("/api/public/contract/[slug]/sign", "PATCH", PATCHHandler);

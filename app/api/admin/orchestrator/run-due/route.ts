@@ -1,3 +1,4 @@
+import { withApiLogging } from "@/lib/logger";
 import { NextRequest, NextResponse } from "next/server";
 import {
     applyLegacyAdminApiDeprecationHeaders,
@@ -15,7 +16,7 @@ function respond(mode: "session" | "legacy_admin_token", body: unknown, init?: R
     });
 }
 
-export async function POST(request: NextRequest) {
+async function POSTHandler(request: NextRequest) {
     const redirectResponse = createLegacyAdminFinalRedirectResponse(request, {
         successorPath: "/api/agency/monitoring/orchestrator/run-due",
     });
@@ -50,3 +51,5 @@ export async function POST(request: NextRequest) {
     const result = await runDueMeetingActions({ orgId, batchSize: body.batchSize });
     return respond(access.mode, result);
 }
+
+export const POST = withApiLogging("/api/admin/orchestrator/run-due", "POST", POSTHandler);

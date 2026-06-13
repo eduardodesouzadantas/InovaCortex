@@ -1,21 +1,19 @@
+import { withApiLogging } from "@/lib/logger";
 import { NextResponse } from "next/server";
-import { prisma } from "@/lib/prisma";
-import { getSession } from "@/lib/auth/session";
 import { scanSLABreaches, groupBreachesByRep } from "@/lib/sales/sla-engine";
+import { orgContextErrorResponse, requireOrgContext } from "@/lib/auth/org-context";
 
-const getOrg = async (slug: string) =>
-    prisma.organization.findUnique({ where: { slug }, select: { id: true } });
-
-export async function GET(req: Request, { params }: { params: Promise<{ slug: string }> }) {
-    const session = await getSession();
-    if (!session || session.orgSlug !== (await params).slug) return NextResponse.json({ error: "UNAUTHORIZED" }, { status: 401 });
-    const org = await getOrg((await params).slug);
-    if (!org) return NextResponse.json({ error: "Not found" }, { status: 404 });
+async function GETHandler(req: Request, { params }: { params: Promise<{ slug: string }> }) {
+    const { slug } = await params;
+    const ctx = await requireOrgContext(slug).catch((error) => error);
+    if (ctx instanceof Error) return orgContextErrorResponse(ctx);
 
     const { searchParams } = new URL(req.url);
     const hours = parseInt(searchParams.get("hours") || "48");
 
-    const breaches = await scanSLABreaches(org.id, hours);
+    const breaches = await scanSLABreaches(ctx.orgId, hours);
     const byRep = groupBreachesByRep(breaches);
     return NextResponse.json({ breaches, byRep, total: breaches.length });
 }
+
+export const GET = withApiLogging("/api/org/[slug]/sales/sla", "GET", GETHandler);

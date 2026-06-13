@@ -2,83 +2,98 @@ import { prisma } from "@/lib/prisma";
 import { logger } from "@/lib/logger";
 import { embedTextBatch, getChunkHash } from "./embeddings";
 
-/**
- * Reindexes an organization's knowledge chunks.
- * Processes chunks that don't have embeddings or whose text has changed (hash mismatch).
- */
 export async function reindexOrgKnowledge(orgId: string) {
     logger.info(`Starting Semantic Reindexing for Org: ${orgId}`);
 
     try {
-        // 1. Fetch chunks without embeddings OR where we want to refresh
-        const chunks = await (prisma as any).knowledgeChunk.findMany({
+        const chunks = await prisma.knowledgeChunk.findMany({
             where: {
                 organizationId: orgId,
-                embedding: null // For now, only index what's missing
+                embedding: null,
             },
-            take: 100 // Process in batches
+            select: {
+                id: true,
+                chunkText: true,
+            },
+            take: 100,
         });
 
-        if (chunks.length === 0) {
+        if (!chunks.length) {
             logger.info("No chunks to reindex.");
             return { processed: 0 };
         }
 
-        const texts = chunks.map((c: any) => c.chunkText);
+        const embeddings = await embedTextBatch(chunks.map((chunk) => chunk.chunkText), orgId);
 
-        // 2. Generate Embeddings
-        const embeddings = await embedTextBatch(texts);
-
-        // 3. Update Chunks
-        for (let i = 0; i < chunks.length; i++) {
-            await (prisma as any).knowledgeChunk.update({
-                where: { id: chunks[i].id },
+        for (let index = 0; index < chunks.length; index += 1) {
+            await prisma.knowledgeChunk.update({
+                where: { id: chunks[index].id },
                 data: {
-                    embedding: embeddings[i],
-                    chunkHash: getChunkHash(chunks[i].chunkText) // Update hash too
-                }
+                    embedding: JSON.stringify(embeddings[index]),
+                    chunkHash: getChunkHash(chunks[index].chunkText),
+                },
             });
         }
 
         logger.info(`Reindexed ${chunks.length} chunks for org: ${orgId}`);
         return { processed: chunks.length };
-
-    } catch (error: any) {
-        logger.error(`Reindexing Error: ${error.message}`);
+    } catch (error: unknown) {
+        logger.error("Reindexing Error", {
+            orgId,
+            error: error instanceof Error ? error.message : String(error),
+        });
         throw error;
     }
 }
 
-/**
- * Worker-like function to process ActionQueue memory_reindex_org tasks.
- */
+type ReindexTaskPayload = {
+    orgId?: string;
+};
+
+function parseReindexTaskPayload(payloadJson: string): ReindexTaskPayload {
+    try {
+        const parsed = JSON.parse(payloadJson) as unknown;
+        return typeof parsed === "object" && parsed !== null ? parsed as ReindexTaskPayload : {};
+    } catch {
+        return {};
+    }
+}
+
 export async function processReindexQueue() {
-    const tasks = await (prisma as any).actionQueue.findMany({
+    const tasks = await prisma.actionQueue.findMany({
         where: {
             type: "memory_reindex_org",
-            status: "pending"
+            status: "pending",
         },
-        take: 5
+        select: {
+            id: true,
+            payloadJson: true,
+        },
+        take: 5,
     });
 
     for (const task of tasks) {
         try {
-            const payload = JSON.parse(task.payloadJson);
-            const { orgId } = payload;
+            const payload = parseReindexTaskPayload(task.payloadJson);
+            if (!payload.orgId) {
+                throw new Error("Missing orgId in memory_reindex_org payload");
+            }
 
-            // Mark as executing
-            await (prisma as any).actionQueue.update({
+            await prisma.actionQueue.update({
                 where: { id: task.id },
-                data: { status: "executed", executedAt: new Date() }
+                data: { status: "executed", executedAt: new Date() },
             });
 
-            await reindexOrgKnowledge(orgId);
-
-        } catch (error: any) {
-            logger.error(`ActionQueue Process Error (reindex): ${error.message}`);
-            await (prisma as any).actionQueue.update({
+            await reindexOrgKnowledge(payload.orgId);
+        } catch (error: unknown) {
+            const reason = error instanceof Error ? error.message : String(error);
+            logger.error("ActionQueue Process Error (reindex)", {
+                taskId: task.id,
+                reason,
+            });
+            await prisma.actionQueue.update({
                 where: { id: task.id },
-                data: { status: "rejected", reason: error.message }
+                data: { status: "rejected", reason },
             });
         }
     }

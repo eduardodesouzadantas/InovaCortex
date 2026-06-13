@@ -1,10 +1,11 @@
+import { withApiLogging } from "@/lib/logger";
 import { NextResponse } from "next/server";
 import { getSession } from "@/lib/auth/session";
 import { can } from "@/lib/auth/rbac";
 import { prisma } from "@/lib/prisma";
 
 // GET — fetch current notification channel config
-export async function GET() {
+async function GETHandler() {
     const session = await getSession();
     if (!session || !can(session.role, "manageSettings")) {
         return new NextResponse("Unauthorized", { status: 401 });
@@ -18,7 +19,7 @@ export async function GET() {
 }
 
 // POST — upsert notification channel config
-export async function POST(req: Request) {
+async function POSTHandler(req: Request) {
     const session = await getSession();
     if (!session || !can(session.role, "manageSettings")) {
         return new NextResponse("Unauthorized", { status: 401 });
@@ -56,3 +57,6 @@ export async function POST(req: Request) {
 
     return NextResponse.json({ success: true, channel: updated });
 }
+
+export const GET = withApiLogging("/api/admin/settings/notifications", "GET", GETHandler);
+export const POST = withApiLogging("/api/admin/settings/notifications", "POST", POSTHandler);

@@ -21,7 +21,7 @@ function tierFromScore(score: number): "hot" | "warm" | "cold" {
 }
 
 function assessmentHealth(status: string, updatedAt: Date): NodeHealth {
-    const ageDays = (Date.now() - updatedAt.getTime()) / 86_400_000;
+    const ageDays = (now.getTime() - updatedAt.getTime()) / 86_400_000;
     if (status === "Fechado") return "healthy";
     if (status === "Perdido") return "stale";
     if (ageDays > 14) return "critical";
@@ -32,7 +32,7 @@ function assessmentHealth(status: string, updatedAt: Date): NodeHealth {
 function proposalHealth(status: string, updatedAt: Date): NodeHealth {
     if (status === "accepted") return "healthy";
     if (status === "rejected") return "stale";
-    const ageDays = (Date.now() - updatedAt.getTime()) / 86_400_000;
+    const ageDays = (now.getTime() - updatedAt.getTime()) / 86_400_000;
     if (ageDays > 10) return "critical";
     if (ageDays > 5) return "warning";
     return "healthy";
@@ -135,6 +135,9 @@ describe("nodeRadius", () => {
 
 // ─── Priority rules ───────────────────────────────────────────────────────────
 describe("Priority rules (per spec)", () => {
+    const proposalPriority = (health: NodeHealth): number =>
+        health === "critical" ? 90 : health === "warning" ? 65 : 45;
+
     it("hot lead has priority 85", () => {
         // Mirrors radar-loader logic
         const tier = "hot";
@@ -147,13 +150,11 @@ describe("Priority rules (per spec)", () => {
         expect(priority).toBe(95);
     });
     it("accepted proposal has priority 45 (not critical)", () => {
-        const health: NodeHealth = "healthy";
-        const priority = health === "critical" ? 90 : health === "warning" ? 65 : 45;
+        const priority = proposalPriority("healthy");
         expect(priority).toBe(45);
     });
     it("critical proposal has highest priority (90)", () => {
-        const health: NodeHealth = "critical";
-        const priority = health === "critical" ? 90 : health === "warning" ? 65 : 45;
+        const priority = proposalPriority("critical");
         expect(priority).toBe(90);
     });
 });

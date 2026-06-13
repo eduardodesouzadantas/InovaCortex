@@ -1,10 +1,11 @@
+import { withApiLogging } from "@/lib/logger";
 import { NextRequest, NextResponse } from "next/server";
 import { requireAdminApiAccess } from "@/lib/auth/admin-api-guard";
 import { goLiveWorkspaceHandler } from "@/lib/agency/commercial/workspaces";
 
 export const runtime = "nodejs";
 
-export async function POST(
+async function POSTHandler(
     request: NextRequest,
     { params }: { params: Promise<{ id: string }> },
 ) {
@@ -22,3 +23,5 @@ export async function POST(
     const { id } = await params;
     return goLiveWorkspaceHandler(orgId, id);
 }
+
+export const POST = withApiLogging("/api/agency/commercial/workspaces/[id]/golive", "POST", POSTHandler);

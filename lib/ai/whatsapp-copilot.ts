@@ -1,167 +1,171 @@
-import { prisma } from "@/lib/prisma";
-import { logger } from "@/lib/logger";
-import { CommandEngine } from "./command-engine";
-import { ChatEngine } from "./chat-engine";
 import { sendWhatsAppMessage } from "@/lib/whatsapp";
+import { getOrCreateWhatsAppCopilotSession } from "@/lib/whatsapp/context-service";
+import { logger } from "@/lib/logger";
+import { prisma } from "@/lib/prisma";
 
-/**
- * AI WhatsApp Copilot (V34)
- * Routes incoming WhatsApp messages to CommandEngine or ChatEngine,
- * then formats and sends the structured response back.
- */
+import { ChatEngine, type ChatAnswer } from "./chat-engine";
+import { CommandEngine, type CommandResult } from "./command-engine";
 
-export interface CopilotContext {
+type CopilotActorContext = {
     orgId: string;
     orgSlug: string;
-    senderPhone: string; // E.164
-    messageId: string;
-}
+    userId: string;
+    role: string;
+};
 
-/**
- * Authorized senders: must match a User phone in the org.
- * If WHATSAPP_COPILOT_PHONES env is set, uses that allowlist instead.
- */
-async function resolveOrgForSender(phone: string): Promise<{ orgId: string; orgSlug: string; userId: string; role: string } | null> {
-    // Check env allowlist first
-    const allowlist = process.env.WHATSAPP_COPILOT_PHONES?.split(",").map(p => p.trim()) || [];
-    const allowedOrgSlug = process.env.WHATSAPP_COPILOT_ORG_SLUG;
+function formatCommandResponse(result: CommandResult): string {
+    const lines: string[] = [];
+    lines.push(`*${result.title || "Resultado"}*`);
+    lines.push("");
 
-    if (allowlist.length > 0 && allowedOrgSlug) {
-        if (!allowlist.includes(phone)) return null;
-        const org = await prisma.organization.findUnique({
-            where: { slug: allowedOrgSlug },
-            select: { id: true, slug: true }
-        });
-        if (!org) return null;
-        // Find matching user or use system user
-        const user = await (prisma as any).user.findFirst({
-            where: { organizationId: org.id, role: { in: ["owner", "admin"] } }
-        });
-        return { orgId: org.id, orgSlug: org.slug, userId: user?.id || "system", role: user?.role || "admin" };
+    if (result.resumo) {
+        lines.push(result.resumo);
+        lines.push("");
     }
 
-    return null;
-}
-
-/**
- * Get or create a WhatsApp-specific chat session for this sender.
- */
-async function getOrCreateSession(orgId: string, senderPhone: string): Promise<string> {
-    const sessionTag = `wa_${senderPhone}`;
-    const existing = await (prisma as any).aIChatSession.findFirst({
-        where: { organizationId: orgId, title: sessionTag },
-        orderBy: { updatedAt: "desc" }
-    });
-
-    if (existing) return existing.id;
-
-    const session = await (prisma as any).aIChatSession.create({
-        data: {
-            organizationId: orgId,
-            title: sessionTag,
-            mode: "whatsapp_copilot"
-        }
-    });
-    return session.id;
-}
-
-/**
- * Format a CommandResult into WhatsApp-friendly plain text.
- */
-function formatCommandResponse(result: any): string {
-    const lines: string[] = [];
-    lines.push(`🤖 *${result.title || "Resultado"}*`);
-    lines.push("");
-    if (result.resumo) lines.push(result.resumo);
-    lines.push("");
-
-    if (result.dados && Object.keys(result.dados).length > 0) {
-        lines.push("📊 *Dados:*");
-        for (const [key, value] of Object.entries(result.dados)) {
+    const dataEntries = Object.entries(result.dados);
+    if (dataEntries.length > 0) {
+        lines.push("*Dados:*");
+        for (const [key, value] of dataEntries) {
             if (Array.isArray(value)) {
-                lines.push(`• *${key}:* ${(value as any[]).slice(0, 3).join(" | ")}`);
+                lines.push(`- *${key}:* ${value.slice(0, 3).map(String).join(" | ")}`);
             } else {
-                lines.push(`• *${key}:* ${value}`);
+                lines.push(`- *${key}:* ${String(value)}`);
             }
         }
         lines.push("");
     }
 
-    if (result.acoes?.length > 0) {
-        lines.push("⚡ *Ações:*");
-        result.acoes.slice(0, 5).forEach((a: string) => lines.push(`→ ${a}`));
+    if (result.acoes.length > 0) {
+        lines.push("*Acoes:*");
+        result.acoes.slice(0, 5).forEach((action) => lines.push(`-> ${action}`));
         lines.push("");
     }
 
-    if (result.atalhos?.length > 0) {
-        lines.push(`💡 Próximos: ${result.atalhos.join(" · ")}`);
-    }
-
-    return lines.join("\n").slice(0, 4000); // WhatsApp limit
-}
-
-/**
- * Format a ChatAnswer into WhatsApp-friendly plain text.
- */
-function formatChatResponse(result: any): string {
-    const lines: string[] = [];
-    if (result.resumo) lines.push(result.resumo);
-    lines.push("");
-
-    if (result.acoes?.length > 0) {
-        lines.push("⚡ *Ações recomendadas:*");
-        result.acoes.slice(0, 3).forEach((a: string) => lines.push(`→ ${a}`));
+    if (result.atalhos.length > 0) {
+        lines.push(`Proximos: ${result.atalhos.join(" | ")}`);
     }
 
     return lines.join("\n").slice(0, 4000);
 }
 
-/**
- * Main entry point: process an incoming WhatsApp message.
- */
+function formatChatResponse(result: ChatAnswer): string {
+    const lines: string[] = [];
+    if (result.resumo) {
+        lines.push(result.resumo);
+        lines.push("");
+    }
+
+    if (result.acoes.length > 0) {
+        lines.push("*Acoes recomendadas:*");
+        result.acoes.slice(0, 3).forEach((action) => lines.push(`-> ${action}`));
+    }
+
+    return lines.join("\n").slice(0, 4000);
+}
+
+async function resolveOrgForSender(phone: string): Promise<CopilotActorContext | null> {
+    const allowlist = process.env.WHATSAPP_COPILOT_PHONES?.split(",").map((item) => item.trim()).filter(Boolean) || [];
+    const allowedOrgSlug = process.env.WHATSAPP_COPILOT_ORG_SLUG?.trim();
+
+    if (!allowedOrgSlug || !allowlist.includes(phone)) {
+        return null;
+    }
+
+    const org = await prisma.organization.findUnique({
+        where: { slug: allowedOrgSlug },
+        select: { id: true, slug: true },
+    });
+    if (!org) {
+        return null;
+    }
+
+    const user = await prisma.user.findFirst({
+        where: {
+            organizationId: org.id,
+            role: { in: ["owner", "admin"] },
+        },
+        orderBy: { createdAt: "asc" },
+        select: {
+            id: true,
+            role: true,
+        },
+    });
+
+    return {
+        orgId: org.id,
+        orgSlug: org.slug,
+        userId: user?.id || "system",
+        role: user?.role || "admin",
+    };
+}
+
+function resolveChatRole(role: string): "admin" | "ceo" {
+    return role === "owner" || role === "ceo" ? "ceo" : "admin";
+}
+
 export async function processCopilotMessage(
     senderPhone: string,
     messageText: string,
-    messageId: string
+    messageId: string,
 ) {
     try {
-        logger.info(`WhatsApp Copilot: [${senderPhone}] "${messageText.slice(0, 60)}"`);
+        logger.info("WhatsApp Copilot inbound", {
+            senderPhone,
+            messageId,
+            preview: messageText.slice(0, 60),
+        });
 
-        // 1. Authorize sender
-        const ctx = await resolveOrgForSender(senderPhone);
-        if (!ctx) {
-            logger.warn(`Copilot: unauthorized sender ${senderPhone}`);
-            await sendWhatsAppMessage(senderPhone,
-                "❌ Número não autorizado. Contate seu administrador InovaCortex."
+        const actor = await resolveOrgForSender(senderPhone);
+        if (!actor) {
+            logger.warn("Copilot unauthorized sender", { senderPhone });
+            await sendWhatsAppMessage(
+                senderPhone,
+                "Numero nao autorizado. Contate seu administrador InovaCortex.",
             );
             return;
         }
 
-        const { orgId, orgSlug, userId, role } = ctx;
         const trimmed = messageText.trim();
+        const parsed = CommandEngine.parseInput(trimmed);
 
-        // 2. Route to CommandEngine (if starts with /)
-        const { type, command, args } = CommandEngine.parseInput(trimmed);
-
-        if (type === "command" && command) {
-            const result = await CommandEngine.executeCommand(orgId, userId, role, command, args);
-            const reply = formatCommandResponse(result);
-            await sendWhatsAppMessage(senderPhone, reply);
-            logger.info(`Copilot command response sent: ${command} → ${senderPhone}`);
+        if (parsed.type === "command" && parsed.command) {
+            const result = await CommandEngine.executeCommand(
+                actor.orgId,
+                actor.userId,
+                actor.role,
+                parsed.command,
+                parsed.args,
+            );
+            await sendWhatsAppMessage(senderPhone, formatCommandResponse(result));
+            logger.info("WhatsApp Copilot command response sent", {
+                senderPhone,
+                command: parsed.command,
+                organizationId: actor.orgId,
+            });
             return;
         }
 
-        // 3. Free-form → ChatEngine
-        const sessionId = await getOrCreateSession(orgId, senderPhone);
-        const chatResult = await ChatEngine.answerChat(orgId, sessionId, userId, role as "admin" | "ceo", trimmed);
-        const reply = formatChatResponse(chatResult);
-        await sendWhatsAppMessage(senderPhone, reply);
-        logger.info(`Copilot chat response sent → ${senderPhone}`);
+        const sessionId = await getOrCreateWhatsAppCopilotSession(actor.orgId, senderPhone);
+        const answer = await ChatEngine.answerChat(
+            actor.orgId,
+            sessionId,
+            actor.userId,
+            resolveChatRole(actor.role),
+            trimmed,
+        );
 
-    } catch (error: any) {
-        logger.error(`WhatsApp Copilot Error: ${error.message}`);
-        await sendWhatsAppMessage(senderPhone,
-            "⚠️ Sistema temporariamente indisponível. Tente novamente em instantes."
-        ).catch(() => { });
+        await sendWhatsAppMessage(senderPhone, formatChatResponse(answer));
+        logger.info("WhatsApp Copilot chat response sent", {
+            senderPhone,
+            organizationId: actor.orgId,
+        });
+    } catch (error: unknown) {
+        const message = error instanceof Error ? error.message : String(error);
+        logger.error("WhatsApp Copilot error", { senderPhone, messageId, error: message });
+        await sendWhatsAppMessage(
+            senderPhone,
+            "Sistema temporariamente indisponivel. Tente novamente em instantes.",
+        ).catch(() => undefined);
     }
 }

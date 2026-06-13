@@ -17,6 +17,7 @@ import { prisma } from "@/lib/prisma";
 import { logger } from "@/lib/logger";
 import { generateText } from "ai";
 import { openai } from "@ai-sdk/openai";
+import { assertAIEngineAvailable, isAIUnavailableError, toAIUnavailableError } from "@/lib/http/route-errors";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -44,6 +45,20 @@ export interface GeneratedContent {
     metadata: Record<string, unknown>;
     sourceInsight: string;
     roiSnapshot?: Record<string, unknown>;
+}
+
+export type ContentEngineErrorCode =
+    | "OPENAI_API_KEY_MISSING"
+    | "CONTENT_MODEL_GENERATION_FAILED";
+
+export class ContentEngineError extends Error {
+    code: ContentEngineErrorCode;
+
+    constructor(code: ContentEngineErrorCode, message: string) {
+        super(message);
+        this.name = "ContentEngineError";
+        this.code = code;
+    }
 }
 
 // ─── Shared System Prompt ─────────────────────────────────────────────────────
@@ -125,13 +140,32 @@ async function generate(
     input: ContentInput,
     data: { assessment?: any; roi?: any; proposal?: any },
 ): Promise<GeneratedContent & { raw: string }> {
+    assertAIEngineAvailable();
+
     const fullPrompt = `${BRAND_VOICE}\n${buildDataContext(data)}\n\n---\n\n${prompt}`;
 
-    const { text } = await generateText({
-        model: openai("gpt-4o-mini"),
-        prompt: fullPrompt,
-        maxOutputTokens: 1200,
-    });
+    let text = "";
+    try {
+        const response = await generateText({
+            model: openai("gpt-4o-mini"),
+            prompt: fullPrompt,
+            maxOutputTokens: 1200,
+        });
+        text = response.text;
+    } catch (error) {
+        logger.error("Content engine: OpenAI generation failed", {
+            type,
+            orgId: input.orgId,
+            error: error instanceof Error ? error.message : String(error),
+        });
+        if (isAIUnavailableError(error)) {
+            throw toAIUnavailableError(error);
+        }
+        throw new ContentEngineError(
+            "CONTENT_MODEL_GENERATION_FAILED",
+            "OpenAI content generation failed.",
+        );
+    }
 
     // Parse structured output from the AI
     // AI is instructed to return JSON in each generator function

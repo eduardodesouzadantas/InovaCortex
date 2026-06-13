@@ -1,3 +1,4 @@
+import { withApiLogging } from "@/lib/logger";
 /**
  * GET /api/admin/meetings/metrics
  * V16.3-P3: Returns 30-day meeting performance metrics for the Cockpit.
@@ -8,7 +9,7 @@ import { getSession } from "@/lib/auth/session";
 import { can } from "@/lib/auth/rbac";
 import { prisma } from "@/lib/prisma";
 
-export async function GET() {
+async function GETHandler() {
     const session = await getSession();
     if (!session || !can(session.role, "viewDashboard")) {
         return new NextResponse("Unauthorized", { status: 401 });
@@ -61,3 +62,5 @@ export async function GET() {
         pendingCount,
     });
 }
+
+export const GET = withApiLogging("/api/admin/meetings/metrics", "GET", GETHandler);

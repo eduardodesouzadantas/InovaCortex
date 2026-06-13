@@ -103,15 +103,24 @@ export async function sendAssessmentDossierWhatsApp(
             return { ok: false, status: 404, error: "Assessment nao encontrado" };
         }
 
+        // Register skip reason in MessageLog if consent or phone is missing
         if (!assessment.whatsappConsent || !assessment.phone) {
-            return { ok: false, status: 422, error: "Lead sem consentimento ou telefone valido" };
+            const reason = !assessment.phone 
+                ? "Telefone ausente" 
+                : "Sem consentimento de WhatsApp";
+            
+            await logMessage(assessment.id, "skipped", reason);
+            return { ok: false, status: 422, error: `Lead sem consentimento ou telefone valido: ${reason}` };
         }
 
         const msisdn = formatPhone(assessment.phone);
         if (!msisdn) {
-            await logMessage(assessment.id, "failed", "Numero de telefone invalido");
+            await logMessage(assessment.id, "skipped", `Telefone invalido: ${assessment.phone}`);
             return { ok: false, status: 400, error: "Numero de telefone invalido" };
         }
+
+        // Register initiation attempt
+        await logMessage(assessment.id, "processing", `Iniciando envio via Meta API (${msisdn})`);
 
         const components = buildTemplateComponents(assessment as AssessmentRecord);
         const result = await sendWhatsAppTemplateForOrg(
@@ -124,10 +133,12 @@ export async function sendAssessmentDossierWhatsApp(
 
         if (!result.messageId) {
             const status = result.error === "META_NOT_CONFIGURED" ? 503 : 502;
-            await logMessage(assessment.id, "failed", result.error ?? "META_SEND_FAILED");
+            const errorMsg = result.error ?? "META_SEND_FAILED";
+            
+            await logMessage(assessment.id, "failed", `Erro Meta API: ${errorMsg}`);
             await logAudit("whatsapp", assessment.id, "failed", {
                 organizationId: assessment.organizationId,
-                reason: result.error ?? "META_SEND_FAILED",
+                reason: errorMsg,
             });
             return {
                 ok: false,
@@ -135,11 +146,15 @@ export async function sendAssessmentDossierWhatsApp(
                 error: status === 503
                     ? "Servico nao configurado. Configure credenciais Meta."
                     : "Falha no envio via Meta API",
-                details: result.error,
+                details: errorMsg,
             };
         }
 
-        await logMessage(assessment.id, "sent", JSON.stringify({ messageId: result.messageId }));
+        await logMessage(assessment.id, "sent", JSON.stringify({ 
+            messageId: result.messageId,
+            to: msisdn.slice(-4).padStart(msisdn.length, '*') 
+        }));
+        
         await logAudit("whatsapp", assessment.id, "sent", {
             organizationId: assessment.organizationId,
             phoneTail: msisdn.slice(-4),
@@ -147,10 +162,15 @@ export async function sendAssessmentDossierWhatsApp(
 
         return { ok: true, status: 200, messageId: result.messageId };
     } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
         logger.error("Failed to send assessment dossier via WhatsApp", {
             assessmentId: input.assessmentId,
-            error: error instanceof Error ? error.message : String(error),
+            error: message,
         });
+        
+        // Log critical system error to MessageLog
+        await logMessage(input.assessmentId, "error", `Excecao de sistema: ${message}`);
+
         return { ok: false, status: 500, error: "Erro interno" };
     }
 }

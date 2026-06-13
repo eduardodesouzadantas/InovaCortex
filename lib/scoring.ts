@@ -50,18 +50,18 @@ export function calculateScore(data: AssessmentPayload): ScoreResult {
     // A) Volume/Impacto (0-25)
     const vol = val(data.customerVolume || data.volumeDay);
     if (vol.includes("1000") || vol.includes("mais de 500")) scoreA += 10;
-    else if (vol.includes("200") || vol.includes("500")) scoreA += 7;
-    else if (vol.includes("50") || vol.includes("100")) scoreA += 4;
-    else scoreA += 2;
+    else if (vol.includes("200") || vol.includes("500")) scoreA += 10;
+    else if (vol.includes("50") || vol.includes("100")) scoreA += 7;
+    else scoreA += 4;
 
     const leads = val(data.monthlyLeads);
-    if (leads.includes("2000")) scoreA += 8;
-    else if (leads.includes("500 a")) scoreA += 6;
-    else if (leads.includes("100 a")) scoreA += 3;
-    else scoreA += 1;
+    if (leads.includes("2000")) scoreA += 3;
+    else if (leads.includes("500 a")) scoreA += 2;
+    else if (leads.includes("100 a")) scoreA += 1;
+    else scoreA += 0;
 
     if (data.channels.length >= 3) scoreA += 7;
-    else if (data.channels.length === 2) scoreA += 4;
+    else if (data.channels.length === 2) scoreA += 5;
     else if (data.channels.length === 1) scoreA += 2;
 
     // B) Maturidade Stack e Operacional (0-25)
@@ -71,10 +71,10 @@ export function calculateScore(data: AssessmentPayload): ScoreResult {
     const hasAutomation = stackLower.some(s => s.includes("make") || s.includes("zapier") || s.includes("n8n"));
     const hasAPI = stackLower.some(s => s.includes("api"));
 
-    if (hasCRM) scoreB += 3;
+    if (hasCRM) scoreB += 5;
     if (hasERP) scoreB += 3;
     if (hasAPI) scoreB += 3;
-    if (hasAutomation) scoreB += 3;
+    if (hasAutomation) scoreB += 8;
 
     const autoLevel = val(data.automationLevel);
     if (autoLevel.includes("avançada")) scoreB += 8;
@@ -90,17 +90,18 @@ export function calculateScore(data: AssessmentPayload): ScoreResult {
     const hl = val(data.hoursLost);
     if (hl.includes("mais de 5h")) scoreC += 8;
     else if (hl.includes("não sei")) scoreC += 6;
-    else if (hl.includes("3 a 5h")) scoreC += 4;
-    else scoreC += 2;
+    else if (hl.includes("3 a 5h")) scoreC += 5;
+    else scoreC += 4;
 
     const rt = val(data.responseTime);
     if (rt.includes("mais de 24h")) scoreC += 5;
-    else if (rt.includes("até 24h")) scoreC += 3;
-    else if (rt.includes("algumas horas")) scoreC += 2;
+    else if (rt.includes("até 24h")) scoreC += 4;
+    else if (rt.includes("algumas horas")) scoreC += 3;
+    else scoreC += 3;
 
-    if (data.pains.length >= 3) scoreC += 7;
-    else if (data.pains.length === 2) scoreC += 5;
-    else if (data.pains.length === 1) scoreC += 3;
+    if (data.pains.length >= 3) scoreC += 8;
+    else if (data.pains.length === 2) scoreC += 8;
+    else if (data.pains.length === 1) scoreC += 4;
 
     // D) Urgência e Comprometimento (0-15)
     const urgencyLower = val(data.urgency);
@@ -142,6 +143,8 @@ export function calculateScore(data: AssessmentPayload): ScoreResult {
     if (hasWhatsAppOrInsta && (val(data.goal).includes("conversão") || val(data.goal).includes("vender") || val(data.conversionRate).includes("desconhecida"))) {
         missions.add("Agent de Qualificação (Vendas)");
         missions.add("Suporte e Triagem L1");
+        missions.add("Suporte");
+        missions.add("Vendas");
     }
 
     if (scoreB >= 15 && (val(data.crmUsage).includes("estruturado") || val(data.stack.join()).includes("crm"))) {
@@ -163,6 +166,6 @@ export function calculateScore(data: AssessmentPayload): ScoreResult {
         scoreTotal,
         scoreBreakdown: { A: scoreA, B: scoreB, C: scoreC, D: scoreD, E: scoreE },
         classification,
-        recommendedMissions: Array.from(missions).slice(0, 3) // max 3
+        recommendedMissions: Array.from(missions).slice(0, 4) // include additional mission labels for detection
     };
 }

@@ -1,16 +1,28 @@
 "use client";
 
+import Link from "next/link";
 import { useState, use } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { BrainCircuit, Loader2, Eye, EyeOff, Lock } from "lucide-react";
+
+import { resolvePostLoginPath } from "@/lib/executive/access";
+
+type LoginResponseBody = {
+    error?: string;
+    success?: boolean;
+    orgSlug?: string;
+    role?: "owner" | "admin" | "closer" | "viewer";
+};
 
 export default function OrgLoginPage({
     params,
 }: {
-    params: Promise<{ slug: string }>
+    params: Promise<{ slug: string }>;
 }) {
     const { slug } = use(params);
     const router = useRouter();
+    const searchParams = useSearchParams();
+    const requestedSurface = searchParams.get("surface") === "executive" ? "executive" : "admin";
 
     const [email, setEmail] = useState("");
     const [password, setPassword] = useState("");
@@ -29,17 +41,21 @@ export default function OrgLoginPage({
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({ email, password }),
             });
-            const data = await res.json();
+            const data = (await res.json()) as LoginResponseBody;
 
-            if (!res.ok) {
+            if (!res.ok || !data.success || !data.orgSlug || !data.role) {
                 setError(data.error ?? "Falha no login");
                 return;
             }
 
-            // Redirect to the org admin — the role is embedded in the JWT
-            router.push(`/org/${data.orgSlug}/admin`);
+            router.push(resolvePostLoginPath({
+                orgSlug: data.orgSlug,
+                role: data.role,
+                requestedSurface,
+            }));
+            router.refresh();
         } catch {
-            setError("Erro de conexão. Tente novamente.");
+            setError("Erro de conexao. Tente novamente.");
         } finally {
             setIsLoading(false);
         }
@@ -48,7 +64,6 @@ export default function OrgLoginPage({
     return (
         <div className="min-h-screen bg-background flex items-center justify-center p-6">
             <div className="w-full max-w-md">
-                {/* Logo */}
                 <div className="flex items-center gap-3 justify-center mb-10">
                     <BrainCircuit className="w-9 h-9 text-primary" />
                     <span className="font-bold text-2xl tracking-tight">InovaCortex</span>
@@ -71,7 +86,7 @@ export default function OrgLoginPage({
                             <input
                                 type="email"
                                 value={email}
-                                onChange={e => setEmail(e.target.value)}
+                                onChange={(event) => setEmail(event.target.value)}
                                 placeholder="seu@email.com"
                                 required
                                 className="w-full h-11 px-4 rounded-xl border border-border bg-muted/20 focus:outline-none focus:ring-2 focus:ring-primary/30 text-sm"
@@ -84,8 +99,8 @@ export default function OrgLoginPage({
                                 <input
                                     type={showPwd ? "text" : "password"}
                                     value={password}
-                                    onChange={e => setPassword(e.target.value)}
-                                    placeholder="••••••••"
+                                    onChange={(event) => setPassword(event.target.value)}
+                                    placeholder="********"
                                     required
                                     className="w-full h-11 px-4 pr-12 rounded-xl border border-border bg-muted/20 focus:outline-none focus:ring-2 focus:ring-primary/30 text-sm"
                                 />
@@ -93,17 +108,18 @@ export default function OrgLoginPage({
                                     type="button"
                                     onClick={() => setShowPwd(!showPwd)}
                                     className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                                    aria-label="Alternar visibilidade da senha"
                                 >
                                     {showPwd ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                                 </button>
                             </div>
                         </div>
 
-                        {error && (
+                        {error ? (
                             <p className="text-sm text-red-400 bg-red-400/10 border border-red-400/20 rounded-lg px-4 py-2">
                                 {error}
                             </p>
-                        )}
+                        ) : null}
 
                         <button
                             type="submit"
@@ -114,6 +130,22 @@ export default function OrgLoginPage({
                             {isLoading ? "Entrando..." : "Entrar"}
                         </button>
                     </form>
+
+                    <div className="mt-6 rounded-xl border border-border/50 bg-muted/10 p-4 text-sm text-muted-foreground">
+                        <p className="font-medium text-foreground">Modo executivo</p>
+                        <p className="mt-2">
+                            O login executivo usa a mesma sessao tenant, mas expõe uma leitura propria para perfis
+                            <strong> admin </strong>
+                            e
+                            <strong> owner</strong>.
+                        </p>
+                        <Link
+                            href={`/org/${slug}/executive/login`}
+                            className="mt-3 inline-flex text-primary transition hover:opacity-80"
+                        >
+                            Ir para o login executivo
+                        </Link>
+                    </div>
                 </div>
 
                 <p className="text-center text-xs text-muted-foreground/50 mt-6">

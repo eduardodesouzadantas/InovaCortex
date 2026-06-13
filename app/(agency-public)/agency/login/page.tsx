@@ -7,6 +7,7 @@ import Link from "next/link";
 import { ArrowRight, Crown, Loader2, Shield, ShieldCheck } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
+import { resolveLoginErrorMessage } from "@/lib/auth/login-error-message";
 
 type LoginResponseBody = {
     error?: string;
@@ -17,25 +18,6 @@ type LoginResponseBody = {
 export const agencyLoginNavigation = {
     goToDashboard: () => window.location.assign("/agency/dashboard"),
 };
-
-function toLoginErrorMessage(payload: LoginResponseBody | null | undefined): string {
-    const code = payload?.code?.trim().toUpperCase();
-    const error = payload?.error?.trim().toUpperCase();
-
-    if (code === "UNAUTHORIZED" || error === "INVALID_CREDENTIALS" || error === "UNAUTHORIZED") {
-        return "Credenciais invalidas";
-    }
-
-    if (code === "FORBIDDEN" || error === "FORBIDDEN") {
-        return "Acesso proibido para esta conta";
-    }
-
-    if (code === "SERVICE_UNAVAILABLE" || error === "DATABASE_UNAVAILABLE") {
-        return "Servico temporariamente indisponivel. Tente novamente em instantes.";
-    }
-
-    return payload?.error || "Acesso negado";
-}
 
 export default function AgencyLoginPage() {
     const [email, setEmail] = useState("");
@@ -58,7 +40,7 @@ export default function AgencyLoginPage() {
             const data = (await res.json()) as LoginResponseBody;
 
             if (!res.ok || !data.success) {
-                setError(toLoginErrorMessage(data));
+                setError(resolveLoginErrorMessage(data));
                 return;
             }
 

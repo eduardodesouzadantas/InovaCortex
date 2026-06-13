@@ -1,9 +1,10 @@
+import { withApiLogging } from "@/lib/logger";
 import { NextRequest, NextResponse } from "next/server";
 import { requireAdminApiAccess } from "@/lib/auth/admin-api-guard";
 import { resolveTargetOrgId } from "@/lib/agency/target-org";
 import { completeStaleMeetings } from "@/lib/agency/monitoring/orchestrator-handlers";
 
-export async function POST(request: NextRequest) {
+async function POSTHandler(request: NextRequest) {
     const access = await requireAdminApiAccess(request, {
         requiredRole: "admin",
         allowLegacyTokenFallback: false,
@@ -27,3 +28,5 @@ export async function POST(request: NextRequest) {
     const result = await completeStaleMeetings(orgId);
     return NextResponse.json(result);
 }
+
+export const POST = withApiLogging("/api/agency/monitoring/orchestrator/complete-meetings", "POST", POSTHandler);

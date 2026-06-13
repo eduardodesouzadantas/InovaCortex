@@ -1,3 +1,4 @@
+import { withApiLogging } from "@/lib/logger";
 import { NextRequest, NextResponse } from "next/server";
 import { requireAdminApiAccess } from "@/lib/auth/admin-api-guard";
 import { resolveTargetOrgId } from "@/lib/agency/target-org";
@@ -5,7 +6,7 @@ import { buildAuditCsv } from "@/lib/agency/audit/export-handler";
 
 export const runtime = "nodejs";
 
-export async function GET(request: NextRequest) {
+async function GETHandler(request: NextRequest) {
     const access = await requireAdminApiAccess(request, {
         requiredRole: "admin",
         allowLegacyTokenFallback: false,
@@ -39,3 +40,5 @@ export async function GET(request: NextRequest) {
         },
     });
 }
+
+export const GET = withApiLogging("/api/agency/audit/export", "GET", GETHandler);

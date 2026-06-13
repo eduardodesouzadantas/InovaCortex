@@ -1,10 +1,11 @@
+import { withApiLogging } from "@/lib/logger";
 import { NextRequest, NextResponse } from "next/server";
 import { requireAdminApiAccess } from "@/lib/auth/admin-api-guard";
 import { sendAssessmentDossierWhatsApp } from "@/lib/whatsapp/assessment-send";
 
 export const runtime = "nodejs";
 
-export async function POST(request: NextRequest) {
+async function POSTHandler(request: NextRequest) {
     const access = await requireAdminApiAccess(request, {
         requiredRole: "closer",
         allowLegacyTokenFallback: false,
@@ -30,3 +31,5 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json({ success: true, messageId: result.messageId }, { status: 200 });
 }
+
+export const POST = withApiLogging("/api/agency/whatsapp/send", "POST", POSTHandler);

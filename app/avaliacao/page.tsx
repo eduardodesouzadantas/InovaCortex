@@ -46,7 +46,13 @@ export default function AvaliacaoWizard() {
         if (saved) {
             try {
                 const parsed = JSON.parse(saved);
-                form.reset(parsed);
+                const current = form.getValues();
+                const merged = { ...current, ...parsed };
+                // Garantir que os campos multi-select não sejam nulos para evitar quebra no .includes
+                merged.channels = Array.isArray(merged.channels) ? merged.channels : [];
+                merged.stack = Array.isArray(merged.stack) ? merged.stack : [];
+                merged.pains = Array.isArray(merged.pains) ? merged.pains : [];
+                form.reset(merged);
             } catch (e) { }
         }
     }, [form]);
@@ -328,14 +334,14 @@ export default function AvaliacaoWizard() {
                                                         checked={watch("channels")?.includes(ch)}
                                                         onCheckedChange={(checked) => {
                                                             const val = watch("channels") || [];
-                                                            form.setValue("channels", checked ? [...val, ch] : val.filter((v: any) => v !== ch), { shouldValidate: true });
+                                                            form.setValue("channels", checked ? [...val, ch] : val.filter((v: any) => v !== ch), { shouldValidate: true, shouldDirty: true });
                                                         }}
                                                     />
                                                     <Label htmlFor={`ch-${ch}`}>{ch}</Label>
                                                 </div>
                                             ))}
                                         </div>
-                                        {errors.channels && <p className="text-sm text-red-500">{errors.channels.message}</p>}
+                                        {errors.channels && typeof errors.channels.message === 'string' && <p className="text-sm text-red-500">{errors.channels.message}</p>}
                                     </div>
 
                                     <div className="space-y-3">
@@ -488,18 +494,18 @@ export default function AvaliacaoWizard() {
                                                     checked={watch("pains")?.includes(pain)}
                                                     onCheckedChange={(checked) => {
                                                         const val = watch("pains") || [];
-                                                        form.setValue("pains", checked ? [...val, pain] : val.filter((v: any) => v !== pain), { shouldValidate: true });
+                                                        form.setValue("pains", checked ? [...val, pain] : val.filter((v: any) => v !== pain), { shouldValidate: true, shouldDirty: true });
                                                     }}
                                                 />
                                                 <Label htmlFor={`pain-${pain}`} className="cursor-pointer">{pain}</Label>
                                             </div>
                                         ))}
                                     </div>
-                                    {errors.pains && <p className="text-sm text-red-500">{errors.pains.message}</p>}
+                                    {errors.pains && typeof errors.pains.message === 'string' && <p className="text-sm text-red-500">{errors.pains.message}</p>}
                                 </div>
 
                                 <div className="space-y-3">
-                                    <Label>Objetivo Principal</Label>
+                                    <Label htmlFor="goal">Objetivo Principal</Label>
                                     <Input id="goal" {...register("goal")} placeholder="Ex: Reduzir tempo, aumentar conversão, padronizar dados..." className="bg-background" />
                                     {errors.goal && <p className="text-sm text-red-500">{errors.goal.message}</p>}
                                 </div>
@@ -535,7 +541,7 @@ export default function AvaliacaoWizard() {
                                     <Checkbox
                                         id="whatsappConsent"
                                         checked={watch("whatsappConsent")}
-                                        onCheckedChange={(checked) => form.setValue("whatsappConsent", checked as boolean)}
+                                        onCheckedChange={(checked) => form.setValue("whatsappConsent", checked as boolean, { shouldValidate: true, shouldDirty: true })}
                                         className="mt-1"
                                     />
                                     <div className="grid gap-1.5 leading-none">

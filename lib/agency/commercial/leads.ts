@@ -6,6 +6,26 @@ import { generateProposal } from "@/lib/proposal-engine";
 import { calculateROI } from "@/lib/roi-engine";
 import { logAudit } from "@/lib/audit";
 import { logger } from "@/lib/logger";
+import { isAIUnavailableError, toAIUnavailableError } from "@/lib/http/route-errors";
+import { ensureAssessmentCommercialFlow } from "@/lib/commercial/canonical-flow";
+
+function parseStoredArray(value: unknown): string[] {
+    if (typeof value !== "string" || !value.trim()) return [];
+    try {
+        const parsed = JSON.parse(value);
+        return Array.isArray(parsed) ? parsed.map((item) => String(item)) : [];
+    } catch {
+        return [];
+    }
+}
+
+function parseStoredObject<T>(value: string, fallback: T): T {
+    try {
+        return JSON.parse(value) as T;
+    } catch {
+        return fallback;
+    }
+}
 
 export async function patchLeadHandler(request: NextRequest, id: string): Promise<NextResponse> {
     try {
@@ -64,7 +84,28 @@ export async function generatePresalesHandler(assessmentId: string): Promise<Nex
     try {
         const assessment = await (prisma as any).assessment.findUnique({
             where: { id: assessmentId },
-            include: { preSalesArtifacts: { orderBy: { version: "desc" } } },
+            select: {
+                id: true,
+                name: true,
+                company: true,
+                role: true,
+                segment: true,
+                teamSize: true,
+                volumeDay: true,
+                channels: true,
+                stack: true,
+                pains: true,
+                urgency: true,
+                goal: true,
+                scoreTotal: true,
+                classification: true,
+                recommendedMissions: true,
+                preSalesArtifacts: {
+                    orderBy: { version: "desc" },
+                    select: { version: true },
+                    take: 1,
+                },
+            },
         });
 
         if (!assessment) {
@@ -80,14 +121,14 @@ export async function generatePresalesHandler(assessmentId: string): Promise<Nex
             segment: assessment.segment,
             teamSize: assessment.teamSize,
             volumeDay: assessment.volumeDay,
-            channels: JSON.parse(assessment.channels || "[]"),
-            stack: JSON.parse(assessment.stack || "[]"),
-            pains: JSON.parse(assessment.pains || "[]"),
+            channels: parseStoredArray(assessment.channels),
+            stack: parseStoredArray(assessment.stack),
+            pains: parseStoredArray(assessment.pains),
             urgency: assessment.urgency,
             goal: assessment.goal,
             scoreTotal: assessment.scoreTotal,
             classification: assessment.classification,
-            recommendedMissions: JSON.parse(assessment.recommendedMissions || "[]"),
+            recommendedMissions: parseStoredArray(assessment.recommendedMissions),
         };
 
         const result = await generatePreSalesArtifacts(assessmentId, context);
@@ -119,8 +160,12 @@ export async function generatePresalesHandler(assessmentId: string): Promise<Nex
         if (error.message?.includes("Limite") || error.message?.includes("Aguarde")) {
             return NextResponse.json({ error: error.message }, { status: 429 });
         }
-        if (error.message?.includes("OPENAI_API_KEY")) {
-            return NextResponse.json({ error: error.message }, { status: 503 });
+        if (isAIUnavailableError(error)) {
+            const normalized = toAIUnavailableError(error);
+            return NextResponse.json(
+                { error: normalized.message, code: normalized.code, details: normalized.details },
+                { status: normalized.status },
+            );
         }
 
         return NextResponse.json({ error: "Erro ao gerar artefatos de pre-venda" }, { status: 500 });
@@ -131,13 +176,23 @@ export async function listPresalesHandler(assessmentId: string): Promise<NextRes
     const artifacts = await (prisma as any).preSalesArtifact.findMany({
         where: { assessmentId },
         orderBy: { version: "desc" },
+        select: {
+            id: true,
+            assessmentId: true,
+            version: true,
+            executiveSummary: true,
+            diagnosticQuestions: true,
+            initialArchitecture: true,
+            createdAt: true,
+            updatedAt: true,
+        },
     });
 
     return NextResponse.json({
         artifacts: artifacts.map((artifact: any) => ({
             ...artifact,
-            diagnosticQuestions: JSON.parse(artifact.diagnosticQuestions),
-            initialArchitecture: JSON.parse(artifact.initialArchitecture),
+            diagnosticQuestions: parseStoredObject(artifact.diagnosticQuestions, [] as string[]),
+            initialArchitecture: parseStoredObject(artifact.initialArchitecture, {}),
         })),
     });
 }
@@ -161,6 +216,10 @@ export async function generateProposalHandler(assessmentId: string): Promise<Nex
         return NextResponse.json({ error: "Lead nao encontrado" }, { status: 404 });
     }
 
+    const commercialFlow = await ensureAssessmentCommercialFlow({
+        assessmentId,
+        source: "proposal",
+    });
     const existingVersion = existingProposals[0]?.version ?? 0;
 
     const proposal = generateProposal({
@@ -173,8 +232,10 @@ export async function generateProposalHandler(assessmentId: string): Promise<Nex
     const saved = await (prisma as any).proposal.create({
         data: {
             assessmentId,
+            dealId: commercialFlow.dealId,
             version: proposal.version,
             publicSlug: proposal.publicSlug,
+            organizationId: assessment.organizationId,
             modules: JSON.stringify(proposal.modules),
             pricingEstimate: JSON.stringify(proposal.pricingEstimate),
             roiSnapshot: JSON.stringify(proposal.roiSnapshot),
@@ -182,6 +243,17 @@ export async function generateProposalHandler(assessmentId: string): Promise<Nex
             status: "draft",
         },
     });
+
+    if (commercialFlow.dealId) {
+        await (prisma as any).activity.create({
+            data: {
+                organizationId: assessment.organizationId,
+                dealId: commercialFlow.dealId,
+                type: "proposal_created",
+                note: `Proposal ${saved.id} v${proposal.version} generated from assessment ${assessmentId}`,
+            },
+        });
+    }
 
     await logAudit("presales", assessmentId, "proposalGenerated", {
         version: proposal.version,
@@ -228,15 +300,54 @@ export async function updateProposalHandler(
         return NextResponse.json({ error: "proposalId required" }, { status: 400 });
     }
 
+    const existingProposal = await (prisma as any).proposal.findFirst({
+        where: { id: proposalId, assessmentId },
+        select: {
+            id: true,
+            status: true,
+            dealId: true,
+            assessment: {
+                select: {
+                    organizationId: true,
+                },
+            },
+        },
+    });
+
+    if (!existingProposal) {
+        return NextResponse.json({ error: "Proposal not found" }, { status: 404 });
+    }
+
+    let resolvedDealId = existingProposal.dealId as string | null;
+    if (!resolvedDealId) {
+        const commercialFlow = await ensureAssessmentCommercialFlow({
+            assessmentId,
+            source: "proposal",
+        });
+        resolvedDealId = commercialFlow.dealId;
+    }
+
     const updateData: any = { updatedAt: new Date() };
     if (status) updateData.status = status;
     if (customNotes !== undefined) updateData.customNotes = customNotes;
     if (modules) updateData.modules = JSON.stringify(modules);
+    if (resolvedDealId) updateData.dealId = resolvedDealId;
 
     const updated = await (prisma as any).proposal.update({
         where: { id: proposalId },
         data: updateData,
     });
+
+    if (resolvedDealId && status && status !== existingProposal.status) {
+        await (prisma as any).activity.create({
+            data: {
+                organizationId: existingProposal.assessment.organizationId,
+                dealId: resolvedDealId,
+                type: "proposal_status_changed",
+                note: `Proposal ${proposalId} status changed from ${existingProposal.status} to ${status}`,
+            },
+        });
+    }
 
     const action = status ? "proposalStatusChanged" : "proposalUpdated";
     await logAudit("presales", assessmentId, action, { proposalId, status, customNotes: !!customNotes });

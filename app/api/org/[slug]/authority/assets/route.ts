@@ -1,69 +1,84 @@
 /**
  * app/api/org/[slug]/authority/assets/route.ts
- * V21: PATCH — ProofAsset status mutations (review / approve / publish).
- *
- * Guardrail: anonLevel == "none" + allowPublicName != true → block publish.
+ * PATCH: ProofAsset status mutations (review / approve / publish).
  */
 
-import { NextRequest, NextResponse } from "next/server";
 import { requireOrgContext } from "@/lib/auth/org-context";
+import {
+    assertTenantRole,
+    invalidTenantInputResponse,
+    resolveTenantRouteError,
+    tenantNotFoundResponse,
+} from "@/lib/auth/tenant-route";
 import { recalcProofStats } from "@/lib/authority/proof-engine";
-import { logger } from "@/lib/logger";
+import { logger, withApiLogging } from "@/lib/logger";
+import { NextRequest, NextResponse } from "next/server";
 
-interface Params { params: Promise<{ slug: string }> }
+interface Params {
+    params: Promise<{ slug: string }>;
+}
 
-export async function PATCH(req: NextRequest, { params }: Params) {
+async function PATCHHandler(req: NextRequest, { params }: Params) {
     const { slug } = await params;
-    let ctx;
-    try { ctx = await requireOrgContext(slug); }
-    catch { return NextResponse.json({ error: "Unauthorized" }, { status: 401 }); }
+    const ctx = await requireOrgContext(slug).catch((error) => error);
+    if (ctx instanceof Error) {
+        return resolveTenantRouteError(ctx, "Failed to resolve authority asset context");
+    }
+    try {
+        assertTenantRole(ctx.role, "admin");
+    } catch (error) {
+        return resolveTenantRouteError(error, "Failed to authorize authority asset update");
+    }
 
-    let body: { assetId: string; action: string };
-    try { body = await req.json(); }
-    catch { return NextResponse.json({ error: "Invalid JSON" }, { status: 400 }); }
+    let body: { action?: string; assetId?: string };
+    try {
+        body = await req.json();
+    } catch {
+        return invalidTenantInputResponse("Invalid JSON");
+    }
 
     const { assetId, action } = body;
-    if (!assetId || !action) return NextResponse.json({ error: "assetId and action required" }, { status: 400 });
+    if (!assetId || !action) {
+        return invalidTenantInputResponse("assetId and action required");
+    }
 
     const { prisma } = await import("@/lib/prisma");
-
-    const asset = await (prisma as any).proofAsset.findUnique({
-        where: { id: assetId },
+    const asset = await prisma.proofAsset.findFirst({
+        where: { id: assetId, orgId: ctx.orgId },
         select: { id: true, orgId: true, status: true, anonLevel: true, workspaceId: true },
-    }).catch(() => null);
+    });
 
-    if (!asset) return NextResponse.json({ error: "Asset not found" }, { status: 404 });
-
-    if (ctx.orgId !== asset.orgId) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+    if (!asset) {
+        return tenantNotFoundResponse("Asset not found");
+    }
 
     try {
         switch (action) {
             case "review": {
-                await (prisma as any).proofAsset.update({
-                    where: { id: assetId }, data: { status: "reviewed" },
+                await prisma.proofAsset.update({
+                    where: { id: assetId },
+                    data: { status: "reviewed" },
                 });
                 return NextResponse.json({ message: "Enviado para revisão", status: "reviewed" });
             }
-
             case "approve": {
-                await (prisma as any).proofAsset.update({
-                    where: { id: assetId }, data: { status: "approved" },
+                await prisma.proofAsset.update({
+                    where: { id: assetId },
+                    data: { status: "approved" },
                 });
                 await recalcProofStats(asset.orgId);
                 return NextResponse.json({ message: "Aprovado! Stats recalculadas.", status: "approved" });
             }
-
             case "publish": {
                 if (asset.status !== "approved") {
                     return NextResponse.json({ error: "Somente ativos aprovados podem ser publicados" }, { status: 422 });
                 }
 
-                // Guardrail: anonLevel none + allowPublicName != true
                 if (asset.anonLevel === "none") {
-                    const workspace = await (prisma as any).clientWorkspace.findUnique({
-                        where: { id: asset.workspaceId },
+                    const workspace = await prisma.clientWorkspace.findFirst({
+                        where: { id: asset.workspaceId, organizationId: ctx.orgId },
                         select: { allowPublicName: true },
-                    }).catch(() => null);
+                    });
 
                     if (!workspace?.allowPublicName) {
                         return NextResponse.json({
@@ -72,18 +87,21 @@ export async function PATCH(req: NextRequest, { params }: Params) {
                     }
                 }
 
-                await (prisma as any).proofAsset.update({
-                    where: { id: assetId }, data: { status: "published" },
+                await prisma.proofAsset.update({
+                    where: { id: assetId },
+                    data: { status: "published" },
                 });
                 await recalcProofStats(asset.orgId);
-                return NextResponse.json({ message: "Publicado! ✅", status: "published" });
+                return NextResponse.json({ message: "Publicado!", status: "published" });
             }
-
             default:
-                return NextResponse.json({ error: `Unknown action: ${action}` }, { status: 400 });
+                return invalidTenantInputResponse(`Unknown action: ${action}`);
         }
-    } catch (err: any) {
-        logger.error("[AuthorityAPI] Mutation failed", { assetId, action, error: err?.message });
-        return NextResponse.json({ error: err?.message ?? "Internal error" }, { status: 500 });
+    } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        logger.error("[AuthorityAPI] Mutation failed", { assetId, action, error: message });
+        return resolveTenantRouteError(error, "Failed to update authority asset");
     }
 }
+
+export const PATCH = withApiLogging("/api/org/[slug]/authority/assets", "PATCH", PATCHHandler);

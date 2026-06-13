@@ -4,10 +4,12 @@ import { requireOrgContext } from "@/lib/auth/org-context";
 import { assertRole } from "@/lib/auth/rbac";
 import { prisma } from "@/lib/prisma";
 import { getAuthContext } from "@/lib/auth/session";
+import { refreshOnboardingStatusFromTenant, getTenantReadinessFromOnboarding } from "@/lib/onboarding-status";
 import Link from "next/link";
 import { WorkspaceTaskBoard } from "./task-board";
 import { WorkspaceChecklist } from "./checklist";
 import { ChevronLeft, Briefcase, Zap, CheckCircle2, AlertTriangle } from "lucide-react";
+import { TenantReadinessBanner } from "@/components/go-live/tenant-readiness-banner";
 
 export const runtime = "nodejs";
 
@@ -62,6 +64,8 @@ export default async function WorkspaceDetailPage({
     const roiRow = await (prisma as any).roiProjection.findUnique({
         where: { assessmentId: workspace.assessmentId }
     });
+    const onboarding = await refreshOnboardingStatusFromTenant(ctx!.orgId).catch(() => null);
+    const readiness = onboarding ? getTenantReadinessFromOnboarding(onboarding) : null;
 
     const tasksDone = workspace.tasks.filter((t: any) => t.status === "done").length;
     const tasksBlocked = workspace.tasks.filter((t: any) => t.status === "blocked").length;
@@ -114,14 +118,29 @@ export default async function WorkspaceDetailPage({
                     ))}
                 </div>
 
+                {readiness && (
+                    <TenantReadinessBanner slug={slug} readiness={readiness} />
+                )}
+
                 {/* Go-Live button */}
                 {workspace.status === "provisioning" && isAdmin && (
-                    <form action={`/api/admin/workspaces/${workspace.id}/golive`} method="post">
-                        <button type="submit"
-                            className="w-full md:w-auto btn-primary flex items-center gap-2 justify-center">
+                    readiness?.ready && ctx!.subscriptionStatus !== "suspended" ? (
+                        <form action={`/api/admin/workspaces/${workspace.id}/golive`} method="post">
+                            <button type="submit"
+                                className="w-full md:w-auto btn-primary flex items-center gap-2 justify-center">
+                                <Zap className="w-4 h-4" /> Marcar Go-Live
+                            </button>
+                        </form>
+                    ) : (
+                        <button
+                            type="button"
+                            disabled
+                            className="w-full md:w-auto btn-primary flex items-center gap-2 justify-center opacity-60 cursor-not-allowed"
+                            title="Complete o email, a pipeline e o primeiro contato/deal antes do go-live."
+                        >
                             <Zap className="w-4 h-4" /> Marcar Go-Live
                         </button>
-                    </form>
+                    )
                 )}
                 {workspace.goLiveAt && (
                     <p className="text-sm text-green-500 flex items-center gap-1.5">

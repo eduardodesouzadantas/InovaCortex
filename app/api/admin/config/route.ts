@@ -1,3 +1,4 @@
+import { withApiLogging } from "@/lib/logger";
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import {
@@ -124,7 +125,7 @@ async function resolveLegacyConfigTarget(request: NextRequest): Promise<
     };
 }
 
-export async function GET(request: NextRequest) {
+async function GETHandler(request: NextRequest) {
     const resolution = await resolveLegacyConfigTarget(request);
     if (!resolution.ok) return resolution.response;
 
@@ -140,7 +141,7 @@ export async function GET(request: NextRequest) {
     );
 }
 
-export async function POST(request: NextRequest) {
+async function POSTHandler(request: NextRequest) {
     const resolution = await resolveLegacyConfigTarget(request);
     if (!resolution.ok) return resolution.response;
 
@@ -184,3 +185,6 @@ export async function POST(request: NextRequest) {
         resolution.value.successorPath,
     );
 }
+
+export const GET = withApiLogging("/api/admin/config", "GET", GETHandler);
+export const POST = withApiLogging("/api/admin/config", "POST", POSTHandler);

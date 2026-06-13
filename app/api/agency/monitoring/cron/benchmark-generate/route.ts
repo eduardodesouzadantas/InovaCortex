@@ -1,3 +1,4 @@
+import { withApiLogging } from "@/lib/logger";
 import { NextRequest, NextResponse } from "next/server";
 import { requireAdminApiAccess } from "@/lib/auth/admin-api-guard";
 import { runBenchmarkGenerate } from "@/lib/agency/monitoring/benchmark-generate-handler";
@@ -9,7 +10,7 @@ function hasValidCronToken(request: NextRequest): boolean {
     return true;
 }
 
-export async function POST(request: NextRequest) {
+async function POSTHandler(request: NextRequest) {
     const allowByCron = hasValidCronToken(request);
     if (!allowByCron) {
         const access = await requireAdminApiAccess(request, {
@@ -38,3 +39,5 @@ export async function POST(request: NextRequest) {
         return NextResponse.json({ error: "Failed to generate benchmarks" }, { status: 500 });
     }
 }
+
+export const POST = withApiLogging("/api/agency/monitoring/cron/benchmark-generate", "POST", POSTHandler);

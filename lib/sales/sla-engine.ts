@@ -31,6 +31,7 @@ export async function scanSLABreaches(
 
     const assignments = await (prisma as any).leadAssignment.findMany({
         where: {
+            organizationId: orgId,
             status: "active",
             salesRep: { organizationId: orgId, active: true },
             assessment: {
@@ -38,7 +39,9 @@ export async function scanSLABreaches(
                 updatedAt: { lte: cutoff },
             },
         },
-        include: {
+        select: {
+            assessmentId: true,
+            assignedAt: true,
             salesRep: { select: { id: true, name: true, role: true } },
             assessment: { select: { id: true, company: true, classification: true, updatedAt: true } },
         },
@@ -84,7 +87,10 @@ export function groupBreachesByRep(breaches: SLABreach[]) {
 export async function getRepWorkload(orgId: string) {
     const reps = await (prisma as any).salesRep.findMany({
         where: { organizationId: orgId, active: true },
-        include: {
+        select: {
+            id: true,
+            name: true,
+            role: true,
             _count: { select: { assignments: { where: { status: "active" } } } },
         },
         orderBy: { name: "asc" },

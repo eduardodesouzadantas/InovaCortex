@@ -6,6 +6,7 @@ import { useState } from "react";
 import { ArrowRight, Building2, Eye, EyeOff, Loader2, ShieldCheck, Sparkles } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
+import { resolveLoginErrorMessage } from "@/lib/auth/login-error-message";
 import { resolvePostLoginPath } from "@/lib/executive/access";
 
 type LoginResponseBody = {
@@ -16,31 +17,16 @@ type LoginResponseBody = {
     role?: "owner" | "admin" | "closer" | "viewer";
 };
 
-function toLoginErrorMessage(payload: LoginResponseBody | null | undefined): string {
-    const code = payload?.code?.trim().toUpperCase();
-    const error = payload?.error?.trim().toUpperCase();
-
-    if (code === "UNAUTHORIZED" || error === "INVALID_CREDENTIALS" || error === "UNAUTHORIZED") {
-        return "Credenciais invalidas";
-    }
-
-    if (code === "FORBIDDEN" || error === "FORBIDDEN") {
-        return "Acesso proibido para esta conta";
-    }
-
-    if (code === "SERVICE_UNAVAILABLE" || error === "DATABASE_UNAVAILABLE") {
-        return "Servico temporariamente indisponivel. Tente novamente em instantes.";
-    }
-
-    return payload?.error || "Acesso negado";
-}
-
 export function EmpresaLoginClient({
     continueHref,
+    inviteSuccess,
+    initialEmail,
 }: {
     continueHref: string | null;
+    inviteSuccess?: boolean;
+    initialEmail?: string;
 }) {
-    const [email, setEmail] = useState("");
+    const [email, setEmail] = useState(initialEmail ?? "");
     const [password, setPassword] = useState("");
     const [showPassword, setShowPassword] = useState(false);
     const [loading, setLoading] = useState(false);
@@ -62,7 +48,7 @@ export function EmpresaLoginClient({
             const payload = (await response.json()) as LoginResponseBody;
 
             if (!response.ok || !payload.success || !payload.orgSlug || !payload.role) {
-                setError(toLoginErrorMessage(payload));
+                setError(resolveLoginErrorMessage(payload));
                 return;
             }
 
@@ -89,20 +75,25 @@ export function EmpresaLoginClient({
                     Entrada do cliente
                 </div>
 
-                <h1 className="mt-6 text-4xl font-semibold tracking-tight md:text-5xl">
-                    Acesso da Empresa
-                </h1>
+                <h1 className="mt-6 text-4xl font-semibold tracking-tight md:text-5xl">Acesso da Empresa</h1>
                 <p className="mt-4 max-w-2xl text-sm leading-7 text-slate-300 md:text-base">
-                    Entre direto no ambiente da sua empresa. Nenhuma escolha de área, nenhum jargão interno.
-                    Apenas sua conta e sua operação.
+                    Entre direto no ambiente da sua empresa. Nenhuma escolha de area, nenhum jargao interno.
+                    Apenas sua conta e sua operacao.
                 </p>
+
+                {inviteSuccess ? (
+                    <div className="mt-6 rounded-2xl border border-emerald-400/20 bg-emerald-400/10 px-4 py-4 text-sm text-emerald-100">
+                        <p className="font-medium">Seu acesso foi ativado com sucesso.</p>
+                        <p className="mt-1 leading-6">Agora voce pode entrar com seu e-mail e senha.</p>
+                    </div>
+                ) : null}
 
                 <div className="mt-8 grid gap-3 sm:grid-cols-2">
                     <div className="rounded-2xl border border-white/8 bg-black/10 px-4 py-4 text-sm text-slate-300">
-                        Fluxo único e direto.
+                        Fluxo unico e direto.
                     </div>
                     <div className="rounded-2xl border border-white/8 bg-black/10 px-4 py-4 text-sm text-slate-300">
-                        Compatível com login legado.
+                        Compativel com login legado.
                     </div>
                     <div className="rounded-2xl border border-white/8 bg-black/10 px-4 py-4 text-sm text-slate-300">
                         Funciona em mobile e desktop.
@@ -117,12 +108,12 @@ export function EmpresaLoginClient({
                         href="/avaliacao"
                         className="inline-flex h-11 items-center justify-center rounded-2xl border border-amber-400/20 bg-amber-400/10 px-4 text-sm font-semibold text-amber-100 transition hover:bg-amber-400/15"
                     >
-                        Fazer Avaliação
+                        Fazer Avaliacao
                     </Link>
                 </div>
 
                 <p className="mt-3 text-xs leading-6 text-slate-400">
-                    Acesso interno da agência continua direto em{" "}
+                    Acesso interno da agencia continua direto em{" "}
                     <Link href="/agency/login" className="text-amber-200 transition hover:text-amber-100">
                         /agency/login
                     </Link>
@@ -136,9 +127,7 @@ export function EmpresaLoginClient({
                         <Building2 className="h-6 w-6" />
                     </div>
                     <div>
-                        <p className="text-[11px] font-semibold uppercase tracking-[0.22em] text-slate-400">
-                            Empresa
-                        </p>
+                        <p className="text-[11px] font-semibold uppercase tracking-[0.22em] text-slate-400">Empresa</p>
                         <h2 className="text-2xl font-semibold tracking-tight">Entrar na Empresa</h2>
                     </div>
                 </div>
@@ -197,17 +186,17 @@ export function EmpresaLoginClient({
                 <div className="mt-6 rounded-2xl border border-white/8 bg-white/[0.03] px-4 py-4 text-sm text-slate-300">
                     <div className="flex items-center gap-2 font-medium text-slate-100">
                         <ShieldCheck className="h-4 w-4 text-emerald-300" />
-                        Fluxo canônico
+                        Fluxo canonico
                     </div>
                     <p className="mt-2 leading-6">
-                        O login da empresa leva você ao console correto da organização sem mostrar áreas internas da agência.
+                        O login da empresa leva voce ao console correto da organizacao sem mostrar areas internas da agencia.
                     </p>
                     {continueHref ? (
                         <Link
                             href={continueHref}
                             className="mt-3 inline-flex text-amber-200 transition hover:text-amber-100"
                         >
-                            Continuar para minha área
+                            Continuar para minha area
                         </Link>
                     ) : null}
                 </div>

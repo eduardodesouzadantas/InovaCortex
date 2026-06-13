@@ -3,8 +3,10 @@
 import { useEffect, useState } from "react";
 import { useParams } from "next/navigation";
 import { AlertCircle, LayoutGrid, Loader2, Send, ShieldAlert, Smile, Paperclip, X } from "lucide-react";
+import { readApiData } from "./api-envelope";
 
 interface ComposeBoxProps {
+    slug?: string;
     conversationId: string;
     isOutside24h: boolean;
     onSent: () => void;
@@ -22,9 +24,9 @@ function getErrorMessage(err: unknown, fallback: string): string {
     return fallback;
 }
 
-export function ComposeBox({ conversationId, isOutside24h, onSent }: ComposeBoxProps) {
+export function ComposeBox({ slug: providedSlug, conversationId, isOutside24h, onSent }: ComposeBoxProps) {
     const params = useParams();
-    const slug = params.slug as string;
+    const slug = providedSlug ?? (params.slug as string);
 
     const [text, setText] = useState("");
     const [sending, setSending] = useState(false);
@@ -40,10 +42,7 @@ export function ComposeBox({ conversationId, isOutside24h, onSent }: ComposeBoxP
             setError(null);
             try {
                 const res = await fetch(`/api/org/${slug}/whatsapp/templates`);
-                const data = await res.json().catch(() => ({}));
-                if (!res.ok) {
-                    throw new Error(data?.error || "Falha ao carregar templates");
-                }
+                const data = await readApiData<{ templates?: TemplateItem[] }>(res, "Falha ao carregar templates");
                 const approved = (data.templates || []).filter((tmpl: TemplateItem) => tmpl.status === "approved");
                 setTemplates(approved);
             } catch (err: unknown) {
@@ -70,11 +69,7 @@ export function ComposeBox({ conversationId, isOutside24h, onSent }: ComposeBoxP
                     type: "text",
                 }),
             });
-
-            const data = await res.json().catch(() => ({}));
-            if (!res.ok) {
-                throw new Error(data?.message || data?.error || "Erro ao enviar mensagem");
-            }
+            await readApiData<unknown>(res, "Erro ao enviar mensagem");
             setText("");
             onSent();
         } catch (err: unknown) {
@@ -99,10 +94,7 @@ export function ComposeBox({ conversationId, isOutside24h, onSent }: ComposeBoxP
                     templateLanguage,
                 }),
             });
-            const data = await res.json().catch(() => ({}));
-            if (!res.ok) {
-                throw new Error(data?.message || data?.error || "Erro ao enviar template");
-            }
+            await readApiData<unknown>(res, "Erro ao enviar template");
             setShowTemplates(false);
             onSent();
         } catch (err: unknown) {

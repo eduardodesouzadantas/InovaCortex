@@ -1,3 +1,4 @@
+import { withApiLogging } from "@/lib/logger";
 import { NextRequest, NextResponse } from "next/server";
 import { requireAdminApiAccess } from "@/lib/auth/admin-api-guard";
 import { generatePresalesHandler, listPresalesHandler } from "@/lib/agency/commercial/leads";
@@ -5,7 +6,7 @@ import { generatePresalesHandler, listPresalesHandler } from "@/lib/agency/comme
 export const runtime = "nodejs";
 export const maxDuration = 60;
 
-export async function POST(
+async function POSTHandler(
     request: NextRequest,
     { params }: { params: Promise<{ id: string }> },
 ) {
@@ -21,7 +22,7 @@ export async function POST(
     return generatePresalesHandler(id);
 }
 
-export async function GET(
+async function GETHandler(
     request: NextRequest,
     { params }: { params: Promise<{ id: string }> },
 ) {
@@ -36,3 +37,6 @@ export async function GET(
     const { id } = await params;
     return listPresalesHandler(id);
 }
+
+export const POST = withApiLogging("/api/agency/commercial/leads/[id]/generate-presales", "POST", POSTHandler);
+export const GET = withApiLogging("/api/agency/commercial/leads/[id]/generate-presales", "GET", GETHandler);

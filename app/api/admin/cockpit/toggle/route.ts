@@ -1,3 +1,4 @@
+import { withApiLogging } from "@/lib/logger";
 import { NextRequest, NextResponse } from "next/server";
 import { getSession } from "@/lib/auth/session";
 import { assertRole } from "@/lib/auth/rbac";
@@ -11,7 +12,7 @@ export const runtime = "nodejs";
  * Body: { key: string, enabled: boolean }
  * RBAC: owner | admin only
  */
-export async function POST(request: NextRequest) {
+async function POSTHandler(request: NextRequest) {
     const session = await getSession();
     if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
@@ -35,3 +36,5 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json({ success: true, key, enabled });
 }
+
+export const POST = withApiLogging("/api/admin/cockpit/toggle", "POST", POSTHandler);

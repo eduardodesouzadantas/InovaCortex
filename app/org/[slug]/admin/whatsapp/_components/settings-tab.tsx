@@ -33,9 +33,9 @@ function getErrorMessage(err: unknown, fallback: string): string {
     return fallback;
 }
 
-export function SettingsTab() {
+export function SettingsTab({ slug: providedSlug }: { slug?: string }) {
     const params = useParams();
-    const slug = params.slug as string;
+    const slug = providedSlug ?? (params.slug as string);
 
     const [activeSubtab, setActiveSubtab] = useState("api");
     const [loading, setLoading] = useState(true);

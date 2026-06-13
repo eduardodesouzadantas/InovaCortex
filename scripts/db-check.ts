@@ -1,17 +1,23 @@
-import { PrismaClient } from '@prisma/client'
-const prisma = new PrismaClient()
+import { PrismaClient } from "@prisma/client";
+
+const prisma = new PrismaClient();
 
 async function main() {
-    const orgs = await (prisma as any).organization.findMany();
-    console.log("Organizations in DB:", orgs.map((o: any) => ({ id: o.id, slug: o.slug, name: o.name })));
-
-    const assessments = await (prisma as any).assessment.findMany({
-        take: 5,
-        orderBy: { createdAt: 'desc' }
+    const orgs = await prisma.organization.findMany({
+        select: { id: true, slug: true, name: true },
     });
-    console.log("Last 5 Assessments:", assessments.map((a: any) => ({ id: a.id, email: a.email, createdAt: a.createdAt })));
 
-    const count = await (prisma as any).assessment.count();
+    console.log("Organizations in DB:", orgs);
+
+    const assessments = await prisma.assessment.findMany({
+        take: 5,
+        orderBy: { createdAt: "desc" },
+        select: { id: true, email: true, createdAt: true },
+    });
+
+    console.log("Last 5 Assessments:", assessments);
+
+    const count = await prisma.assessment.count();
     console.log("Total Assessments:", count);
 }
 

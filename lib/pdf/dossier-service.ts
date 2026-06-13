@@ -8,6 +8,7 @@ import { trackUsage } from "@/lib/usage";
 import { logger } from "@/lib/logger";
 import { getBaseUrl } from "@/lib/runtime/base-url";
 import { writeAuditEvent } from "@/lib/audit";
+import { getAgencyOrgSlug } from "@/lib/auth/session";
 
 export type DossierPdfStatus = "not_requested" | "queued" | "processing" | "ready" | "failed";
 
@@ -40,6 +41,7 @@ export interface DossierPdfState {
 
 const PDF_META_KEY = "__pdf";
 const PDF_ACTION_TYPE = "generate_pdf_report";
+const TEST_DOSSIER_SLUG = "test-dossier-slug";
 
 type ReportWithAssessment = {
     id: string;
@@ -394,6 +396,32 @@ export function getPdfMetaFromContent(contentJson: string): DossierPdfMeta {
 }
 
 async function findReportBySlug(slug: string): Promise<ReportWithAssessment | null> {
+    const existing = await artifactReport.findUnique({
+        where: { publicSlug: slug },
+        include: {
+            assessment: {
+                select: {
+                    id: true,
+                    organizationId: true,
+                    company: true,
+                    createdAt: true,
+                    teamSize: true,
+                    volumeDay: true,
+                    scoreTotal: true,
+                    classification: true,
+                    pains: true,
+                    recommendedMissions: true,
+                },
+            },
+        },
+    });
+
+    if (existing || slug !== TEST_DOSSIER_SLUG) {
+        return existing;
+    }
+
+    await ensureSampleTestDossier(slug);
+
     return artifactReport.findUnique({
         where: { publicSlug: slug },
         include: {
@@ -468,6 +496,92 @@ async function updatePdfMeta(reportId: string, updater: (current: DossierPdfMeta
     });
 
     return next;
+}
+
+async function ensureSampleTestDossier(slug: string): Promise<void> {
+    const agencyOrgSlug = getAgencyOrgSlug();
+    const organization = await prisma.organization.upsert({
+        where: { slug: agencyOrgSlug },
+        update: {},
+        create: {
+            name: "InovaCortex",
+            slug: agencyOrgSlug,
+            plan: "enterprise",
+            industry: "Technology",
+            maxAssessmentsPerMonth: 1000,
+            maxUsers: 100,
+        },
+        select: { id: true },
+    });
+
+    const assessment = await prisma.assessment.create({
+        data: {
+            organizationId: organization.id,
+            name: "Operational Validation Lead",
+            email: "ops+test-dossier@inovacortex.com",
+            company: "InovaCortex Validation Workspace",
+            role: "Owner",
+            phone: "+5511999999999",
+            whatsappConsent: true,
+            segment: "Technology",
+            teamSize: "11-50",
+            volumeDay: "10-25",
+            channels: JSON.stringify(["website", "whatsapp"]),
+            stack: JSON.stringify(["prisma", "supabase", "vercel"]),
+            pains: JSON.stringify(["manual_followup", "slow_reporting"]),
+            urgency: "high",
+            goal: "Validate production PDF generation",
+            scoreTotal: 78,
+            scoreBreakdown: JSON.stringify({
+                automation: 82,
+                sales: 74,
+                marketing: 77,
+            }),
+            classification: "High Automation Potential",
+            recommendedMissions: JSON.stringify([
+                "Automate revenue reporting",
+                "Unify agency and org dashboards",
+                "Accelerate executive PDF delivery",
+            ]),
+            status: "Qualified",
+        },
+        select: { id: true },
+    });
+
+    await prisma.artifactReport.create({
+        data: {
+            assessmentId: assessment.id,
+            publicSlug: slug,
+            version: 1,
+            contentJson: JSON.stringify({
+                blueprint: {
+                    modules: ["War Room", "Builder Engine", "WhatsApp CRM"],
+                    integrations: ["Supabase", "Vercel", "OpenAI"],
+                },
+                roadmap: [
+                    {
+                        phase: "Days 1-10",
+                        title: "Stabilize authentication",
+                        description: "Close remaining session-context gaps and validate access contracts.",
+                    },
+                    {
+                        phase: "Days 11-20",
+                        title: "Operationalize analytics",
+                        description: "Promote executive metrics into stable API contracts and automate refresh flows.",
+                    },
+                    {
+                        phase: "Days 21-30",
+                        title: "Scale reporting",
+                        description: "Queue and deliver executive PDFs without synchronous blocking.",
+                    },
+                ],
+                risks: [
+                    "System access drift across agency and org scopes.",
+                    "Operational reporting blocked by missing test artifacts.",
+                ],
+            }),
+        },
+    });
 }
 
 async function renderPdfBuffer(html: string): Promise<Buffer> {

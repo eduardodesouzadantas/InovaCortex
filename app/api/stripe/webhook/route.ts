@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getStripeClient, isStripeEnabled } from "@/lib/stripe";
-import { logger } from "@/lib/logger";
+import { logger, withApiLogging } from "@/lib/logger";
+import { normalizeOrganizationAccountStatus } from "@/lib/billing/account-status";
 
 export const runtime = "nodejs";
 
@@ -13,7 +14,7 @@ export const runtime = "nodejs";
  *   STRIPE_SECRET_KEY
  *   STRIPE_WEBHOOK_SECRET
  */
-export async function POST(request: NextRequest) {
+async function POSTHandler(request: NextRequest) {
     if (!isStripeEnabled()) {
         return NextResponse.json({ received: true, mode: "stub" });
     }
@@ -85,12 +86,13 @@ async function handleSubscriptionUpsert(event: any) {
     if (!org) return;
 
     const plan = planFromPriceId(sub.items?.data?.[0]?.price?.id);
+    const subscriptionStatus = normalizeOrganizationAccountStatus(sub.status);
 
     await (prisma as any).organization.update({
         where: { id: org.id },
         data: {
             stripeSubscriptionId: sub.id,
-            subscriptionStatus: sub.status,           // active | trialing | past_due...
+            subscriptionStatus,
             currentPeriodStart: new Date(sub.current_period_start * 1000),
             currentPeriodEnd: new Date(sub.current_period_end * 1000),
             plan,
@@ -108,7 +110,7 @@ async function handleSubscriptionDeleted(event: any) {
 
     await (prisma as any).organization.update({
         where: { id: org.id },
-        data: { subscriptionStatus: "canceled", plan: "free", maxAssessmentsPerMonth: 10 },
+        data: { subscriptionStatus: "suspended", plan: "free", maxAssessmentsPerMonth: 10 },
     });
 
     logger.info("Subscription canceled", { orgId: org.id });
@@ -132,8 +134,10 @@ async function handlePaymentFailed(event: any) {
 
     await (prisma as any).organization.update({
         where: { id: org.id },
-        data: { subscriptionStatus: "past_due" },
+        data: { subscriptionStatus: "suspended" },
     });
 
-    logger.warn("Payment failed — org moved to past_due", { orgId: org.id });
+    logger.warn("Payment failed — org moved to suspended", { orgId: org.id });
 }
+
+export const POST = withApiLogging("/api/stripe/webhook", "POST", POSTHandler);

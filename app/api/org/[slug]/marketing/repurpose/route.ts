@@ -1,105 +1,124 @@
 /**
  * app/api/org/[slug]/marketing/repurpose/route.ts
- * V21: API endpoints for RepurposeArtifact actions.
- *
- * POST /api/org/[slug]/marketing/repurpose
- *   → generate repurpose for a marketingPlanId
- *
- * PATCH /api/org/[slug]/marketing/repurpose
- *   → review | approve | status mutation on artifact
+ * POST generates repurpose artifacts; PATCH mutates artifact status.
  */
 
-import { NextRequest, NextResponse } from "next/server";
 import { requireOrgContext } from "@/lib/auth/org-context";
+import {
+    assertTenantRole,
+    invalidTenantInputResponse,
+    resolveTenantRouteError,
+    tenantNotFoundResponse,
+} from "@/lib/auth/tenant-route";
+import { logger, withApiLogging } from "@/lib/logger";
 import { repurposeFromPlan } from "@/lib/repurpose/repurpose-engine";
-import { logger } from "@/lib/logger";
+import { NextRequest, NextResponse } from "next/server";
 
-interface Params { params: Promise<{ slug: string }> }
+interface Params {
+    params: Promise<{ slug: string }>;
+}
 
-// ─── POST: Generate repurpose ─────────────────────────────────────────────────
-
-export async function POST(req: NextRequest, { params }: Params) {
+async function POSTHandler(req: NextRequest, { params }: Params) {
     const { slug } = await params;
-    let ctx;
-    try { ctx = await requireOrgContext(slug); }
-    catch { return NextResponse.json({ error: "Unauthorized" }, { status: 401 }); }
+    const ctx = await requireOrgContext(slug).catch((error) => error);
+    if (ctx instanceof Error) {
+        return resolveTenantRouteError(ctx, "Failed to resolve repurpose context");
+    }
+    try {
+        assertTenantRole(ctx.role, "admin");
+    } catch (error) {
+        return resolveTenantRouteError(error, "Failed to authorize repurpose generation");
+    }
 
-    let body: { marketingPlanId: string };
-    try { body = await req.json(); }
-    catch { return NextResponse.json({ error: "Invalid JSON" }, { status: 400 }); }
+    let body: { marketingPlanId?: string };
+    try {
+        body = await req.json();
+    } catch {
+        return invalidTenantInputResponse("Invalid JSON");
+    }
 
-    const { marketingPlanId } = body;
-    if (!marketingPlanId) return NextResponse.json({ error: "marketingPlanId required" }, { status: 400 });
+    if (!body.marketingPlanId) {
+        return invalidTenantInputResponse("marketingPlanId required");
+    }
 
     const { prisma } = await import("@/lib/prisma");
+    const plan = await prisma.marketingPlan.findFirst({
+        where: { id: body.marketingPlanId, orgId: ctx.orgId },
+        select: { id: true, orgId: true },
+    });
 
-    const plan = await (prisma as any).marketingPlan.findUnique({
-        where: { id: marketingPlanId },
-        select: { id: true, orgId: true, status: true },
-    }).catch(() => null);
-
-    if (!plan) return NextResponse.json({ error: "Plan not found" }, { status: 404 });
-
-    if (ctx.orgId !== plan.orgId) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+    if (!plan) {
+        return tenantNotFoundResponse("Plan not found");
+    }
 
     try {
-        const result = await repurposeFromPlan(plan.orgId, marketingPlanId);
+        const result = await repurposeFromPlan(plan.orgId, body.marketingPlanId);
         return NextResponse.json({
             artifactId: result.artifactId,
-            stub: result.stub,
             fromCache: result.fromCache,
+            message: "Repurpose processado",
+            stub: result.stub,
             tokensUsed: result.tokensUsed,
-            message: result.stub
-                ? "Repurpose gerado (STUB — sem API key ou orçamento)"
-                : result.fromCache
-                    ? "Repurpose carregado do cache 🚀"
-                    : "Repurpose gerado com IA ✅",
         });
-    } catch (err: any) {
-        logger.error("[RepurposeAPI] POST failed", { marketingPlanId, error: err?.message });
-        return NextResponse.json({ error: err?.message ?? "Internal error" }, { status: 500 });
+    } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        logger.error("[RepurposeAPI] POST failed", { marketingPlanId: body.marketingPlanId, error: message });
+        return resolveTenantRouteError(error, "Failed to generate repurpose artifact");
     }
 }
 
-// ─── PATCH: Artifact status mutation ─────────────────────────────────────────
-
-export async function PATCH(req: NextRequest, { params }: Params) {
+async function PATCHHandler(req: NextRequest, { params }: Params) {
     const { slug } = await params;
-    let ctx;
-    try { ctx = await requireOrgContext(slug); }
-    catch { return NextResponse.json({ error: "Unauthorized" }, { status: 401 }); }
+    const ctx = await requireOrgContext(slug).catch((error) => error);
+    if (ctx instanceof Error) {
+        return resolveTenantRouteError(ctx, "Failed to resolve repurpose context");
+    }
+    try {
+        assertTenantRole(ctx.role, "admin");
+    } catch (error) {
+        return resolveTenantRouteError(error, "Failed to authorize repurpose update");
+    }
 
-    let body: { artifactId: string; action: string };
-    try { body = await req.json(); }
-    catch { return NextResponse.json({ error: "Invalid JSON" }, { status: 400 }); }
+    let body: { action?: string; artifactId?: string };
+    try {
+        body = await req.json();
+    } catch {
+        return invalidTenantInputResponse("Invalid JSON");
+    }
 
     const { artifactId, action } = body;
-    if (!artifactId || !action) return NextResponse.json({ error: "artifactId and action required" }, { status: 400 });
+    if (!artifactId || !action) {
+        return invalidTenantInputResponse("artifactId and action required");
+    }
 
     const { prisma } = await import("@/lib/prisma");
+    const artifact = await prisma.repurposeArtifact.findFirst({
+        where: { id: artifactId, orgId: ctx.orgId },
+        select: { id: true },
+    });
 
-    const artifact = await (prisma as any).repurposeArtifact.findUnique({
-        where: { id: artifactId },
-        select: { id: true, orgId: true, status: true },
-    }).catch(() => null);
+    if (!artifact) {
+        return tenantNotFoundResponse("Artifact not found");
+    }
 
-    if (!artifact) return NextResponse.json({ error: "Artifact not found" }, { status: 404 });
-
-    if (ctx.orgId !== artifact.orgId) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
-
-    const STATUS_MAP: Record<string, { next: string; label: string }> = {
-        review: { next: "reviewed", label: "Enviado para revisão" },
+    const statusMap: Record<string, { label: string; next: string }> = {
         approve: { next: "approved", label: "Aprovado!" },
         publish: { next: "published", label: "Publicado!" },
+        review: { next: "reviewed", label: "Enviado para revisão" },
     };
 
-    const transition = STATUS_MAP[action];
-    if (!transition) return NextResponse.json({ error: `Unknown action: ${action}` }, { status: 400 });
+    const transition = statusMap[action];
+    if (!transition) {
+        return invalidTenantInputResponse(`Unknown action: ${action}`);
+    }
 
-    await (prisma as any).repurposeArtifact.update({
+    await prisma.repurposeArtifact.update({
         where: { id: artifactId },
         data: { status: transition.next },
     });
 
     return NextResponse.json({ message: transition.label, status: transition.next });
 }
+
+export const POST = withApiLogging("/api/org/[slug]/marketing/repurpose", "POST", POSTHandler);
+export const PATCH = withApiLogging("/api/org/[slug]/marketing/repurpose", "PATCH", PATCHHandler);

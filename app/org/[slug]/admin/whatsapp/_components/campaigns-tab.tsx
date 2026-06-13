@@ -36,9 +36,9 @@ function getErrorMessage(err: unknown, fallback: string): string {
     return err instanceof Error && err.message ? err.message : fallback;
 }
 
-export function CampaignsTab() {
+export function CampaignsTab({ slug: providedSlug }: { slug?: string }) {
     const params = useParams();
-    const slug = params.slug as string;
+    const slug = providedSlug ?? (params.slug as string);
 
     const [campaigns, setCampaigns] = useState<CampaignItem[]>([]);
     const [templates, setTemplates] = useState<CampaignTemplate[]>([]);

@@ -29,6 +29,15 @@ export type BuilderAccessResult =
     | { allowed: true; orgId: string }
     | { allowed: false; reason: string; status: GuardFailureStatus };
 
+const BUILDER_ACCESS_CACHE_TTL_MS = 60_000;
+
+let builderAccessCache: {
+    expiresAt: number;
+    orgId: string;
+    agencyOrgSlug: string;
+    builderEnabled: boolean;
+} | null = null;
+
 function isTruthyFlag(value: string | undefined): boolean {
     if (!value) return false;
     const normalized = value.trim().toLowerCase();
@@ -155,7 +164,19 @@ export async function checkBuilderAccess(
     }
 
     const { prisma } = await import("@/lib/prisma");
-    const org = await (prisma as any).organization.findUnique({
+    const normalizedOrgSlug = orgSlug.trim().toLowerCase();
+    const cached = builderAccessCache;
+
+    if (
+        cached
+        && cached.expiresAt > Date.now()
+        && cached.agencyOrgSlug === normalizedOrgSlug
+        && cached.builderEnabled
+    ) {
+        return { allowed: true, orgId: cached.orgId };
+    }
+
+    const org = await prisma.organization.findUnique({
         where: { slug: orgSlug },
         select: { id: true, slug: true },
     }).catch(() => null);
@@ -165,14 +186,26 @@ export async function checkBuilderAccess(
     }
 
     if (org.slug === INTERNAL_ORG_SLUG) {
+        builderAccessCache = {
+            expiresAt: Date.now() + BUILDER_ACCESS_CACHE_TTL_MS,
+            orgId: org.id,
+            agencyOrgSlug: normalizedOrgSlug,
+            builderEnabled: true,
+        };
         return { allowed: true, orgId: org.id };
     }
 
-    const setting = await (prisma as any).appSetting.findUnique({
+    const setting = await prisma.appSetting.findUnique({
         where: { key: SETTING_KEY },
     }).catch(() => null);
 
     if (setting?.value === "true") {
+        builderAccessCache = {
+            expiresAt: Date.now() + BUILDER_ACCESS_CACHE_TTL_MS,
+            orgId: org.id,
+            agencyOrgSlug: normalizedOrgSlug,
+            builderEnabled: true,
+        };
         return { allowed: true, orgId: org.id };
     }
 

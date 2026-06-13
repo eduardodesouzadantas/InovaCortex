@@ -1,3 +1,4 @@
+import { withApiLogging } from "@/lib/logger";
 export const runtime = "nodejs";
 
 import { type NextResponse } from "next/server";
@@ -20,10 +21,12 @@ function applyDeprecationHeaders(response: NextResponse): NextResponse {
  * POST /api/admin/login (legacy adapter)
  * Temporary compatibility layer that forwards auth to the canonical agency login logic.
  */
-export async function POST(request: Request) {
+async function POSTHandler(request: Request) {
     const response = await loginWithPassword(request, {
         endpoint: "admin_adapter",
         requireScope: "agency",
     });
     return applyDeprecationHeaders(response);
 }
+
+export const POST = withApiLogging("/api/admin/login", "POST", POSTHandler);

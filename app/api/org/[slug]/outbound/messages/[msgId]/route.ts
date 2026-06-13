@@ -1,3 +1,4 @@
+import { withApiLogging } from "@/lib/logger";
 /**
  * app/api/org/[slug]/outbound/messages/[msgId]/route.ts
  * V21: PATCH — Mark OutboundMessage as sent (manual confirmation).
@@ -5,24 +6,45 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { requireOrgContext } from "@/lib/auth/org-context";
+import {
+    assertTenantRole,
+    invalidTenantInputResponse,
+    resolveTenantRouteError,
+    tenantNotFoundResponse,
+} from "@/lib/auth/tenant-route";
 
 interface Params { params: Promise<{ slug: string; msgId: string }> }
 
-export async function PATCH(req: NextRequest, { params }: Params) {
+async function PATCHHandler(req: NextRequest, { params }: Params) {
     const { slug, msgId } = await params;
-    let ctx;
-    try { ctx = await requireOrgContext(slug); }
-    catch { return NextResponse.json({ error: "Unauthorized" }, { status: 401 }); }
+    const ctx = await requireOrgContext(slug).catch((error) => error);
+    if (ctx instanceof Error) {
+        return resolveTenantRouteError(ctx, "Failed to resolve outbound message context");
+    }
+    try {
+        assertTenantRole(ctx.role, "closer");
+    } catch (error) {
+        return resolveTenantRouteError(error, "Failed to authorize outbound message update");
+    }
 
-    let body: { status: string };
+    let body: { status?: string };
     try { body = await req.json(); }
-    catch { return NextResponse.json({ error: "Invalid JSON" }, { status: 400 }); }
+    catch { return invalidTenantInputResponse("Invalid JSON"); }
+
+    if (!body.status || typeof body.status !== "string") {
+        return invalidTenantInputResponse("status is required");
+    }
 
     const { prisma } = await import("@/lib/prisma");
-    await (prisma as any).outboundMessage.updateMany({
+    const result = await prisma.outboundMessage.updateMany({
         where: { id: msgId, orgId: ctx.orgId },
         data: { status: body.status ?? "sent", sentAt: new Date() },
     });
+    if (!result.count) {
+        return tenantNotFoundResponse("Outbound message not found");
+    }
 
     return NextResponse.json({ message: "Mensagem atualizada", status: body.status });
 }
+
+export const PATCH = withApiLogging("/api/org/[slug]/outbound/messages/[msgId]", "PATCH", PATCHHandler);

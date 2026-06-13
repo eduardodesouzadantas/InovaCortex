@@ -74,8 +74,8 @@ function assessmentHealth(status: string, updatedAt: Date): NodeHealth {
     const ageDays = (Date.now() - updatedAt.getTime()) / 86_400_000;
     if (status === "Fechado") return "healthy";
     if (status === "Perdido") return "stale";
-    if (ageDays > 7) return "warning";
     if (ageDays > 14) return "critical";
+    if (ageDays > 7) return "warning";
     return "healthy";
 }
 
@@ -83,8 +83,8 @@ function proposalHealth(status: string, updatedAt: Date): NodeHealth {
     if (status === "accepted") return "healthy";
     if (status === "rejected") return "stale";
     const ageDays = (Date.now() - updatedAt.getTime()) / 86_400_000;
-    if (ageDays > 5) return "warning";
     if (ageDays > 10) return "critical";
+    if (ageDays > 5) return "warning";
     return "healthy";
 }
 

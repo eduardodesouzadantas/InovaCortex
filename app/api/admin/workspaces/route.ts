@@ -1,3 +1,4 @@
+import { withApiLogging } from "@/lib/logger";
 import { NextRequest, NextResponse } from "next/server";
 import { getSession } from "@/lib/auth/session";
 import { assertRole } from "@/lib/auth/rbac";
@@ -15,7 +16,7 @@ export const runtime = "nodejs";
  * Run stale-task and stale-provisioning checks for the current org.
  * admin+ only.
  */
-export async function POST(request: NextRequest) {
+async function POSTHandler(request: NextRequest) {
     const redirectResponse = createLegacyAdminFinalRedirectResponse(request, {
         successorPath: "/api/agency/commercial/workspaces/nudge",
     });
@@ -45,7 +46,7 @@ export async function POST(request: NextRequest) {
  * GET /api/admin/workspaces
  * List all workspaces for the current org.
  */
-export async function GET(request: NextRequest) {
+async function GETHandler(request: NextRequest) {
     const redirectResponse = createLegacyAdminFinalRedirectResponse(request, {
         successorPath: "/api/agency/commercial/workspaces",
     });
@@ -58,3 +59,6 @@ export async function GET(request: NextRequest) {
         successorPath: "/api/agency/commercial/workspaces",
     });
 }
+
+export const POST = withApiLogging("/api/admin/workspaces", "POST", POSTHandler);
+export const GET = withApiLogging("/api/admin/workspaces", "GET", GETHandler);

@@ -1,10 +1,11 @@
+import { withApiLogging } from "@/lib/logger";
 import { NextRequest, NextResponse } from "next/server";
 import { requireAdminApiAccess } from "@/lib/auth/admin-api-guard";
 import { updateWorkspaceChecklistHandler } from "@/lib/agency/commercial/workspaces";
 
 export const runtime = "nodejs";
 
-export async function PATCH(
+async function PATCHHandler(
     request: NextRequest,
     { params }: { params: Promise<{ id: string; itemId: string }> },
 ) {
@@ -23,3 +24,5 @@ export async function PATCH(
     const { status, notes } = await request.json();
     return updateWorkspaceChecklistHandler(orgId, id, itemId, status, notes);
 }
+
+export const PATCH = withApiLogging("/api/agency/commercial/workspaces/[id]/checklist/[itemId]", "PATCH", PATCHHandler);

@@ -10,6 +10,7 @@
 
 import { prisma } from '@/lib/prisma';
 import { logger } from '@/lib/logger';
+import { publishRealtimeEvent } from '@/lib/realtime/event-stream';
 
 export type SystemEventType =
     | 'lead_created'
@@ -51,16 +52,55 @@ export interface LogSystemEventParams {
     payload: Record<string, any>;
 }
 
+export interface CreateSystemEventParams {
+    organizationId: string;
+    type: string;
+    severity?: string;
+    message?: string | null;
+    entityType?: string | null;
+    entityId?: string | null;
+    payloadJson?: string;
+    dedupeKey?: string | null;
+}
+
+export async function createSystemEvent(params: CreateSystemEventParams) {
+    const event = await (prisma as any).systemEvent.create({
+        data: {
+            organizationId: params.organizationId,
+            type: params.type,
+            severity: params.severity ?? "info",
+            message: params.message ?? null,
+            entityType: params.entityType ?? null,
+            entityId: params.entityId ?? null,
+            payloadJson: params.payloadJson ?? "{}",
+            dedupeKey: params.dedupeKey ?? null,
+        },
+    });
+
+    publishRealtimeEvent({
+        id: event.id,
+        organizationId: event.organizationId,
+        type: event.type,
+        severity: event.severity,
+        message: event.message,
+        entityType: event.entityType,
+        entityId: event.entityId,
+        payloadJson: event.payloadJson,
+        createdAt: event.createdAt,
+        dedupeKey: event.dedupeKey ?? null,
+    });
+
+    return event;
+}
+
 export async function logSystemEvent(params: LogSystemEventParams) {
     try {
-        const event = await (prisma as any).systemEvent.create({
-            data: {
-                organizationId: params.organizationId,
-                type: params.type,
-                entityType: params.entityType,
-                entityId: params.entityId,
-                payloadJson: JSON.stringify(params.payload),
-            },
+        const event = await createSystemEvent({
+            organizationId: params.organizationId,
+            type: params.type,
+            entityType: params.entityType,
+            entityId: params.entityId,
+            payloadJson: JSON.stringify(params.payload),
         });
 
         logger.info(`[SYSTEM_EVENT] ${params.type}`, {

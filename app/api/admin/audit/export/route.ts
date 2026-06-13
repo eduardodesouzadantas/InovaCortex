@@ -1,44 +1,26 @@
+import { withApiLogging } from "@/lib/logger";
 import { NextRequest, NextResponse } from "next/server";
-import {
-    applyLegacyAdminApiDeprecationHeaders,
-    createLegacyAdminFinalRedirectResponse,
-    requireAdminApiAccess,
-} from "@/lib/auth/admin-api-guard";
+import { legacyAdminJson, legacyAdminResponse, guardLegacyAdminRequest } from "@/lib/api/legacy-admin-adapter";
 import { resolveTargetOrgId } from "@/lib/agency/target-org";
 import { buildAuditCsv } from "@/lib/agency/audit/export-handler";
 
 export const runtime = "nodejs";
 
-function withDeprecation(response: NextResponse, mode: "session" | "legacy_admin_token") {
-    return applyLegacyAdminApiDeprecationHeaders(response, {
+async function GETHandler(request: NextRequest) {
+    const guarded = await guardLegacyAdminRequest(request, {
         successorPath: "/api/agency/audit/export",
-        mode,
-    });
-}
-
-export async function GET(request: NextRequest) {
-    const redirectResponse = createLegacyAdminFinalRedirectResponse(request, {
-        successorPath: "/api/agency/audit/export",
-    });
-    if (redirectResponse) return redirectResponse;
-
-    const access = await requireAdminApiAccess(request, {
         requiredRole: "admin",
-        allowLegacyTokenFallback: false,
     });
-    if (!access.ok) return NextResponse.json({ error: access.error }, { status: access.status });
-    if (!access.auth?.organizationId) {
-        return withDeprecation(NextResponse.json({ error: "Forbidden" }, { status: 403 }), access.mode);
-    }
+    if (!guarded.ok) return guarded.response;
 
     let orgId: string;
     try {
         orgId = await resolveTargetOrgId({
             requestUrl: request.url,
-            defaultOrgId: access.auth.organizationId,
+            defaultOrgId: guarded.organizationId,
         });
     } catch {
-        return withDeprecation(NextResponse.json({ error: "Organization not found" }, { status: 404 }), access.mode);
+        return legacyAdminJson(guarded.mode, "/api/agency/audit/export", { error: "Organization not found" }, { status: 404 });
     }
 
     const searchParams = new URL(request.url).searchParams;
@@ -49,10 +31,12 @@ export async function GET(request: NextRequest) {
         to: searchParams.get("to") ?? undefined,
     });
 
-    return withDeprecation(new NextResponse(csv, {
+    return legacyAdminResponse(guarded.mode, "/api/agency/audit/export", new NextResponse(csv, {
         headers: {
             "Content-Type": "text/csv; charset=utf-8",
             "Content-Disposition": `attachment; filename="${filename}"`,
         },
-    }), access.mode);
+    }));
 }
+
+export const GET = withApiLogging("/api/admin/audit/export", "GET", GETHandler);

@@ -5,6 +5,9 @@ import { prisma } from "@/lib/prisma";
 import { getAuthContext } from "@/lib/auth/session";
 import { WorkspaceTaskBoard } from "@/app/org/[slug]/admin/workspaces/[id]/task-board";
 import { WorkspaceChecklist } from "@/app/org/[slug]/admin/workspaces/[id]/checklist";
+import { refreshOnboardingStatusFromTenant, getTenantReadinessFromOnboarding } from "@/lib/onboarding-status";
+import { TenantReadinessBanner } from "@/components/go-live/tenant-readiness-banner";
+import { getOrganizationAccountStatus } from "@/lib/billing/account-status";
 import { ChevronLeft, Briefcase, Zap, CheckCircle2, AlertTriangle } from "lucide-react";
 
 export const runtime = "nodejs";
@@ -46,6 +49,9 @@ export default async function AgencyWorkspaceDetailPage({
     const roiRow = await (prisma as any).roiProjection.findUnique({
         where: { assessmentId: workspace.assessmentId },
     });
+    const onboarding = await refreshOnboardingStatusFromTenant(auth.organizationId).catch(() => null);
+    const readiness = onboarding ? getTenantReadinessFromOnboarding(onboarding) : null;
+    const billingStatus = await getOrganizationAccountStatus(auth.organizationId);
 
     const tasksDone = workspace.tasks.filter((task: any) => task.status === "done").length;
     const tasksBlocked = workspace.tasks.filter((task: any) => task.status === "blocked").length;
@@ -109,12 +115,27 @@ export default async function AgencyWorkspaceDetailPage({
                     ))}
                 </div>
 
+                {readiness && (
+                    <TenantReadinessBanner slug={auth.organizationSlug ?? "inovacortex"} readiness={readiness} />
+                )}
+
                 {workspace.status === "provisioning" && isAdmin && (
-                    <form action={`/api/agency/commercial/workspaces/${workspace.id}/golive`} method="post">
-                        <button type="submit" className="btn-primary flex w-full items-center justify-center gap-2 md:w-auto">
+                    readiness?.ready && billingStatus !== "suspended" ? (
+                        <form action={`/api/agency/commercial/workspaces/${workspace.id}/golive`} method="post">
+                            <button type="submit" className="btn-primary flex w-full items-center justify-center gap-2 md:w-auto">
+                                <Zap className="h-4 w-4" /> Marcar Go-Live
+                            </button>
+                        </form>
+                    ) : (
+                        <button
+                            type="button"
+                            disabled
+                            className="btn-primary flex w-full cursor-not-allowed items-center justify-center gap-2 opacity-60 md:w-auto"
+                            title="Complete o email, a pipeline e o primeiro contato/deal antes do go-live."
+                        >
                             <Zap className="h-4 w-4" /> Marcar Go-Live
                         </button>
-                    </form>
+                    )
                 )}
                 {workspace.goLiveAt && (
                     <p className="flex items-center gap-1.5 text-sm text-green-500">

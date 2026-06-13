@@ -1,25 +1,18 @@
-/**
- * lib/builder/builder-orchestrator.ts
- * V25.3: Builder Review Gate + Autopilot.
- *
- * Adds three action types to the builder flow:
- *   builder_generate_pack   — generate prompt pack artifacts
- *   builder_request_review  — mark run "review", notify owner via WhatsApp
- *   builder_execute         — execute run (autopilot, internal only)
- *
- * Also exports:
- *   logBuilderAudit  — typed audit events for builder actions
- *   notifyOwnerReview — WhatsApp notification with approve/reject links
- */
-
 import { logger } from "@/lib/logger";
+import { prisma } from "@/lib/prisma";
 import { sendWhatsAppMessage } from "@/lib/whatsapp";
 import { writeAuditEvent } from "@/lib/audit";
 import { getBaseUrl } from "@/lib/runtime/base-url";
 import { checkBuilderAccess } from "./builder-guard";
 import { buildPromptPack, persistPromptPack } from "./prompt-pack";
-
-// ─── Audit event types ────────────────────────────────────────────────────────
+import {
+    compileBlueprint,
+    selectTemplates,
+    tierFromScore,
+    type Industry,
+    type InputSnapshot,
+    type Mission,
+} from "./blueprint-engine";
 
 export type BuilderAuditEvent =
     | "builderRunCreated"
@@ -27,6 +20,112 @@ export type BuilderAuditEvent =
     | "builderApproved"
     | "builderRejected"
     | "builderExecuted";
+
+export interface ReviewNotifyOptions {
+    ownerPhone: string;
+    orgSlug: string;
+    runId: string;
+    appUrl?: string;
+}
+
+type BuilderInput = {
+    assessmentId?: string | null;
+    proposalId?: string | null;
+    workspaceId?: string | null;
+    company?: string;
+    segment?: string;
+    industry?: string;
+    teamSize?: string;
+    volumeDay?: string;
+    scoreTotal?: number;
+    urgency?: string;
+    channels?: string[];
+    stack?: string[];
+    missions?: string[];
+    modules?: string[];
+};
+
+const DEFAULT_MISSION = "AutomaÃ§Ã£o Operacional BÃ¡sica" as Mission;
+
+function parseBuilderInput(inputJson: string): BuilderInput {
+    try {
+        const parsed = JSON.parse(inputJson) as unknown;
+        return typeof parsed === "object" && parsed !== null ? parsed as BuilderInput : {};
+    } catch {
+        return {};
+    }
+}
+
+function normalizeStringArray(values: string[] | undefined): string[] {
+    return Array.isArray(values) ? values.filter((value) => typeof value === "string" && value.trim().length > 0) : [];
+}
+
+function toIndustry(value: string | undefined): Industry {
+    const normalized = (value ?? "").trim().toLowerCase();
+    switch (normalized) {
+        case "saas":
+        case "clinic":
+        case "ecommerce":
+        case "service":
+        case "education":
+        case "other":
+            return normalized as Industry;
+        default:
+            return "service";
+    }
+}
+
+function toUrgency(value: string | undefined): InputSnapshot["urgency"] {
+    const normalized = (value ?? "").trim().toLowerCase();
+    switch (normalized) {
+        case "high":
+        case "medium":
+            return normalized as "high" | "medium";
+        default:
+            return "low";
+    }
+}
+
+function toMissions(values: string[] | undefined): Mission[] {
+    const normalized = normalizeStringArray(values);
+    return normalized.length ? (normalized as Mission[]) : [DEFAULT_MISSION];
+}
+
+function buildSnapFromInput(input: BuilderInput, orgId: string): InputSnapshot {
+    const channels = normalizeStringArray(input.channels);
+    const stack = normalizeStringArray(input.stack);
+    const channelSet = channels.map((value) => value.toLowerCase());
+    const stackSet = stack.map((value) => value.toLowerCase());
+    const scoreTotal = typeof input.scoreTotal === "number" ? input.scoreTotal : 50;
+
+    return {
+        orgId,
+        assessmentId: input.assessmentId ?? null,
+        proposalId: input.proposalId ?? null,
+        workspaceId: input.workspaceId ?? null,
+        snapshotAt: new Date().toISOString(),
+        company: input.company ?? "Unknown",
+        segment: input.segment ?? "Outros",
+        industry: toIndustry(input.industry),
+        teamSize: input.teamSize ?? "-",
+        volumeDay: input.volumeDay ?? "-",
+        scoreTotal,
+        tier: tierFromScore(scoreTotal),
+        missions: toMissions(input.missions),
+        channels,
+        hasWhatsApp: channelSet.some((value) => value.includes("whatsapp")),
+        hasInstagram: channelSet.some((value) => value.includes("instagram")),
+        hasLinkedIn: channelSet.some((value) => value.includes("linkedin")),
+        hasEmail: channelSet.some((value) => value.includes("email")),
+        hasCRM: stackSet.some((value) => ["crm", "hubspot", "rd", "pipedrive", "salesforce"].some((keyword) => value.includes(keyword))),
+        hasERP: stackSet.some((value) => ["erp", "sap", "totvs", "bling", "omie"].some((keyword) => value.includes(keyword))),
+        hasAutomation: stackSet.some((value) => ["make", "zapier", "n8n"].some((keyword) => value.includes(keyword))),
+        hasAPI: stackSet.some((value) => value.includes("api")),
+        urgency: toUrgency(input.urgency),
+        proposedModules: normalizeStringArray(input.modules),
+        estimatedBudget: "unknown",
+    };
+}
 
 export async function logBuilderAudit(
     orgId: string,
@@ -46,18 +145,13 @@ export async function logBuilderAudit(
             strict: true,
             context: { runId, event },
         });
-    } catch (err: any) {
-        logger.warn("[builder-audit] Failed to write audit event", { event, runId, error: err?.message });
+    } catch (error: unknown) {
+        logger.warn("[builder-audit] Failed to write audit event", {
+            event,
+            runId,
+            error: error instanceof Error ? error.message : String(error),
+        });
     }
-}
-
-// ─── WhatsApp review notification ─────────────────────────────────────────────
-
-export interface ReviewNotifyOptions {
-    ownerPhone: string;        // E.164 e.g. "5511999998888"
-    orgSlug: string;
-    runId: string;
-    appUrl?: string;           // optional override in tests
 }
 
 export async function notifyOwnerReview(opts: ReviewNotifyOptions): Promise<void> {
@@ -66,35 +160,37 @@ export async function notifyOwnerReview(opts: ReviewNotifyOptions): Promise<void
     const approveUrl = `${base}/api/org/${opts.orgSlug}/builder/run/${opts.runId}/approve`;
     const rejectUrl = `${base}/api/org/${opts.orgSlug}/builder/run/${opts.runId}/reject`;
 
-    const body =
-        `🤖 *Builder Autopilot — Revisão Necessária*
-
-Um novo build pack está aguardando sua aprovação.
-
-*Run ID:* \`${opts.runId}\`
-*Organização:* ${opts.orgSlug}
-
-👉 Ver detalhes: ${runUrl}
-
-━━━━━━━━━━━━━━━━━━━━
-✅ *Aprovar:*
-${approveUrl}
-
-❌ *Rejeitar:*
-${rejectUrl}
-━━━━━━━━━━━━━━━━━━━━
-
-Este link expira em 24h. Responda por aqui ou acesse o sistema.`;
+    const body = [
+        "*Builder Autopilot - Revisao Necessaria*",
+        "",
+        "Um novo build pack esta aguardando sua aprovacao.",
+        "",
+        `*Run ID:* \`${opts.runId}\``,
+        `*Organizacao:* ${opts.orgSlug}`,
+        "",
+        `Ver detalhes: ${runUrl}`,
+        "",
+        "*Aprovar:*",
+        approveUrl,
+        "",
+        "*Rejeitar:*",
+        rejectUrl,
+        "",
+        "Este link expira em 24h. Responda por aqui ou acesse o sistema.",
+    ].join("\n");
 
     const result = await sendWhatsAppMessage(opts.ownerPhone, body);
     if (result.stub) {
-        logger.info("[builder] WhatsApp notification stubbed (not configured)", { runId: opts.runId });
-    } else if (result.error) {
-        logger.error("[builder] WhatsApp notification failed", { runId: opts.runId, error: result.error });
+        logger.info("[builder] WhatsApp notification stubbed", { runId: opts.runId });
+        return;
+    }
+    if (result.error) {
+        logger.error("[builder] WhatsApp notification failed", {
+            runId: opts.runId,
+            error: result.error,
+        });
     }
 }
-
-// ─── Action: builder_generate_pack ───────────────────────────────────────────
 
 export async function actionGeneratePack(
     orgSlug: string,
@@ -105,35 +201,32 @@ export async function actionGeneratePack(
     const guard = await checkBuilderAccess(orgSlug, role);
     if (!guard.allowed) return { ok: false, error: "Access denied" };
 
-    const { prisma } = await import("@/lib/prisma");
-
-    const run = await (prisma as any).buildRun.findUnique({
+    const run = await prisma.buildRun.findUnique({
         where: { id: runId },
-        include: { artifacts: true },
+        select: {
+            id: true,
+            orgId: true,
+            inputJson: true,
+        },
     });
+
     if (!run) return { ok: false, error: "Run not found" };
     if (run.orgId !== orgId) return { ok: false, error: "Org mismatch" };
 
-    // Parse input snapshot + compile blueprint
-    let inputData: any = {};
-    try { inputData = JSON.parse(run.inputJson); } catch { }
-
-    // Build a lightweight minimal snapshot from inputJson (no DB round-trip required)
-    const { compileBlueprint, selectTemplates, tierFromScore } = await import("./blueprint-engine");
-    const snap = buildSnapFromInput(inputData, orgId);
-    const templates = selectTemplates(snap);
-    const blueprint = compileBlueprint(templates, snap);
-
-    // Generate prompt pack
+    const inputData = parseBuilderInput(run.inputJson);
+    const snapshot = buildSnapFromInput(inputData, orgId);
+    const templates = selectTemplates(snapshot);
+    const blueprint = compileBlueprint(templates, snapshot);
     const pack = buildPromptPack(blueprint, { orgSlug, maxParts: 6, includeTests: true });
-    await persistPromptPack(pack, runId, orgId);
 
-    await logBuilderAudit(orgId, runId, "builderPackGenerated", { parts: pack.parts.length, checksum: blueprint._checksum });
+    await persistPromptPack(pack, runId, orgId);
+    await logBuilderAudit(orgId, runId, "builderPackGenerated", {
+        parts: pack.parts.length,
+        checksum: blueprint._checksum,
+    });
 
     return { ok: true, partCount: pack.parts.length };
 }
-
-// ─── Action: builder_request_review ───────────────────────────────────────────
 
 export async function actionRequestReview(
     orgSlug: string,
@@ -145,34 +238,35 @@ export async function actionRequestReview(
     const guard = await checkBuilderAccess(orgSlug, role);
     if (!guard.allowed) return { ok: false, error: "Access denied" };
 
-    const { prisma } = await import("@/lib/prisma");
+    const run = await prisma.buildRun.findUnique({
+        where: { id: runId },
+        select: { id: true, orgId: true, status: true },
+    });
 
-    const run = await (prisma as any).buildRun.findUnique({ where: { id: runId } });
     if (!run) return { ok: false, error: "Run not found" };
     if (run.orgId !== orgId) return { ok: false, error: "Org mismatch" };
 
-    // Transition status → review (if not already)
     if (run.status !== "review") {
-        await (prisma as any).buildRun.update({
+        await prisma.buildRun.update({
             where: { id: runId },
             data: { status: "review", updatedAt: new Date() },
         });
     }
 
-    // WhatsApp notification (optional — if ownerPhone provided or fetched from org)
     const phone = ownerPhone ?? await resolveOwnerPhone(orgId);
     if (phone) {
         await notifyOwnerReview({ ownerPhone: phone, orgSlug, runId });
     } else {
-        logger.info("[builder] No owner phone — skipping WhatsApp notification", { runId });
+        logger.info("[builder] No owner phone available", { runId, orgId });
     }
 
-    await logBuilderAudit(orgId, runId, "builderPackGenerated", { status: "review", notified: !!phone });
+    await logBuilderAudit(orgId, runId, "builderPackGenerated", {
+        status: "review",
+        notified: Boolean(phone),
+    });
 
     return { ok: true };
 }
-
-// ─── Action: builder_execute (autopilot) ──────────────────────────────────────
 
 export async function actionExecute(
     orgSlug: string,
@@ -181,27 +275,29 @@ export async function actionExecute(
     role: string,
 ): Promise<{ ok: boolean; error?: string }> {
     const guard = await checkBuilderAccess(orgSlug, role);
-    if (!guard.allowed) return { ok: false, error: "Access denied — internal only" };
+    if (!guard.allowed) return { ok: false, error: "Access denied - internal only" };
 
-    // Autopilot gate: requires AI_AUTOPILOT_BUILDER=true in env
-    const autopilotEnabled = process.env.AI_AUTOPILOT_BUILDER === "true";
-    if (!autopilotEnabled) {
+    if (process.env.AI_AUTOPILOT_BUILDER !== "true") {
         return { ok: false, error: "Autopilot not enabled (AI_AUTOPILOT_BUILDER != true)" };
     }
 
-    const { prisma } = await import("@/lib/prisma");
+    const run = await prisma.buildRun.findUnique({
+        where: { id: runId },
+        select: { id: true, orgId: true, status: true },
+    });
 
-    const run = await (prisma as any).buildRun.findUnique({ where: { id: runId } });
     if (!run) return { ok: false, error: "Run not found" };
-    if (run.status !== "approved") return { ok: false, error: `Cannot execute — status is "${run.status}" (must be "approved")` };
+    if (run.orgId !== orgId) return { ok: false, error: "Org mismatch" };
+    if (run.status !== "approved") {
+        return { ok: false, error: `Cannot execute - status is "${run.status}" (must be "approved")` };
+    }
 
-    await (prisma as any).buildRun.update({
+    await prisma.buildRun.update({
         where: { id: runId },
         data: { status: "executing", updatedAt: new Date() },
     });
 
-    // Stub: real execution would enqueue build jobs; here we mark done
-    await (prisma as any).buildRun.update({
+    await prisma.buildRun.update({
         where: { id: runId },
         data: { status: "done", updatedAt: new Date() },
     });
@@ -211,56 +307,20 @@ export async function actionExecute(
     return { ok: true };
 }
 
-// ─── Helpers ──────────────────────────────────────────────────────────────────
-
 async function resolveOwnerPhone(orgId: string): Promise<string | null> {
     try {
-        const { prisma } = await import("@/lib/prisma");
-        const member = await (prisma as any).organizationMember.findFirst({
-            where: { organizationId: orgId, role: "owner" },
-            include: { user: { select: { phone: true } } },
-        }).catch(() => null);
-        return (member?.user?.phone as string | null) ?? null;
-    } catch { return null; }
-}
+        const ownerRep = await prisma.salesRep.findFirst({
+            where: {
+                organizationId: orgId,
+                active: true,
+                phone: { not: null },
+            },
+            orderBy: [{ role: "asc" }, { updatedAt: "desc" }],
+            select: { phone: true },
+        });
 
-/** Null prisma placeholder — guard uses lazy prisma import internally */
-const prismaPlaceholder: any = null;
-
-/** Build a minimal InputSnapshot from inputJson without a DB round-trip */
-function buildSnapFromInput(input: any, orgId: string): import("./blueprint-engine").InputSnapshot {
-    const channels = Array.isArray(input.channels) ? input.channels : [];
-    const cLow = channels.map((c: string) => c.toLowerCase());
-    const stack = Array.isArray(input.stack) ? input.stack : [];
-    const sLow = stack.map((s: string) => s.toLowerCase());
-    const scoreTotal: number = input.scoreTotal ?? 50;
-    const { tierFromScore } = require("./blueprint-engine");
-
-    return {
-        orgId,
-        assessmentId: input.assessmentId ?? null,
-        proposalId: input.proposalId ?? null,
-        workspaceId: input.workspaceId ?? null,
-        snapshotAt: new Date().toISOString(),
-        company: input.company ?? "Unknown",
-        segment: input.segment ?? "Outros",
-        industry: (input.industry ?? "service") as any,
-        teamSize: input.teamSize ?? "-",
-        volumeDay: input.volumeDay ?? "-",
-        scoreTotal,
-        tier: tierFromScore(scoreTotal),
-        missions: Array.isArray(input.missions) ? input.missions : ["Automação Operacional Básica"],
-        channels,
-        hasWhatsApp: cLow.some((c: string) => c.includes("whatsapp")),
-        hasInstagram: cLow.some((c: string) => c.includes("instagram")),
-        hasLinkedIn: cLow.some((c: string) => c.includes("linkedin")),
-        hasEmail: cLow.some((c: string) => c.includes("email")),
-        hasCRM: sLow.some((s: string) => ["crm", "hubspot", "rd", "pipedrive", "salesforce"].some((k: string) => s.includes(k))),
-        hasERP: sLow.some((s: string) => ["erp", "sap", "totvs", "bling", "omie"].some((k: string) => s.includes(k))),
-        hasAutomation: sLow.some((s: string) => ["make", "zapier", "n8n"].some((k: string) => s.includes(k))),
-        hasAPI: sLow.some((s: string) => s.includes("api")),
-        urgency: (input.urgency === "high" || input.urgency === "medium") ? input.urgency : "low",
-        proposedModules: Array.isArray(input.modules) ? input.modules : [],
-        estimatedBudget: "unknown",
-    };
+        return ownerRep?.phone ?? null;
+    } catch {
+        return null;
+    }
 }

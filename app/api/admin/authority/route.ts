@@ -1,11 +1,9 @@
+import { withApiLogging } from "@/lib/logger";
 import { NextRequest, NextResponse } from "next/server";
-import { getSession } from "@/lib/auth/session";
-import { assertRole } from "@/lib/auth/rbac";
 import {
     applyLegacyAdminApiDeprecationHeaders,
-    createLegacyAdminFinalRedirectResponse,
-    createLegacyAdminWriteFrozenResponse,
 } from "@/lib/auth/admin-api-guard";
+import { guardLegacyAdminRequest } from "@/lib/api/legacy-admin-adapter";
 import { listAuthorityAssetsHandler, runAuthorityActionHandler } from "@/lib/agency/authority/handlers";
 
 export const runtime = "nodejs";
@@ -13,43 +11,34 @@ export const runtime = "nodejs";
 /**
  * Legacy adapter for /api/admin/authority -> /api/agency/authority
  */
-export async function POST(request: NextRequest) {
-    const redirectResponse = createLegacyAdminFinalRedirectResponse(request, {
+async function POSTHandler(request: NextRequest) {
+    const guarded = await guardLegacyAdminRequest(request, {
         successorPath: "/api/agency/authority",
+        requiredRole: "admin",
+        writeOperation: true,
     });
-    if (redirectResponse) return redirectResponse;
-
-    const session = await getSession();
-    if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-
-    try {
-        assertRole(session.role, "admin");
-    } catch {
-        return NextResponse.json({ error: "Forbidden - admin required" }, { status: 403 });
-    }
-
-    const frozen = createLegacyAdminWriteFrozenResponse({ successorPath: "/api/agency/authority" });
-    if (frozen) return frozen;
+    if (!guarded.ok) return guarded.response;
 
     const body = await request.json();
-    const response = await runAuthorityActionHandler(session.orgId, session.userId, body);
+    const response = await runAuthorityActionHandler(guarded.organizationId, guarded.userId, body);
     return applyLegacyAdminApiDeprecationHeaders(response, { successorPath: "/api/agency/authority" });
 }
 
-export async function GET(request: NextRequest) {
-    const redirectResponse = createLegacyAdminFinalRedirectResponse(request, {
+async function GETHandler(request: NextRequest) {
+    const guarded = await guardLegacyAdminRequest(request, {
         successorPath: "/api/agency/authority",
+        requiredRole: "viewer",
     });
-    if (redirectResponse) return redirectResponse;
-
-    const session = await getSession();
-    if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    if (!guarded.ok) return guarded.response;
 
     const { searchParams } = new URL(request.url);
-    const response = await listAuthorityAssetsHandler(session.orgId, {
+    const response = await listAuthorityAssetsHandler(guarded.organizationId, {
         type: searchParams.get("type"),
         status: searchParams.get("status"),
         page: Number(searchParams.get("page") ?? 1),
     });
     return applyLegacyAdminApiDeprecationHeaders(response, { successorPath: "/api/agency/authority" });
 }
+
+export const POST = withApiLogging("/api/admin/authority", "POST", POSTHandler);
+export const GET = withApiLogging("/api/admin/authority", "GET", GETHandler);

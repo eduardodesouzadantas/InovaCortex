@@ -1,3 +1,4 @@
+import { withApiLogging } from "@/lib/logger";
 import { NextRequest, NextResponse } from "next/server";
 import {
     applyLegacyAdminApiDeprecationHeaders,
@@ -9,7 +10,7 @@ import { resendBillingCheckoutHandler } from "@/lib/agency/commercial/billing";
 
 export const runtime = "nodejs";
 
-export async function POST(
+async function POSTHandler(
     req: NextRequest,
     { params }: { params: Promise<{ id: string }> },
 ) {
@@ -38,3 +39,5 @@ export async function POST(
         mode: access.mode,
     });
 }
+
+export const POST = withApiLogging("/api/admin/billing/[id]/resend", "POST", POSTHandler);

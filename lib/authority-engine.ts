@@ -25,6 +25,7 @@ import {
     type AnonLevel,
     type ClientMetrics,
 } from "@/lib/authority-templates";
+import { assertAIEngineAvailable, isAIUnavailableError, toAIUnavailableError } from "@/lib/http/route-errors";
 
 // ─── Metrics Extractor ────────────────────────────────────────────────────────
 
@@ -34,9 +35,10 @@ import {
  */
 export async function extractClientMetrics(
     workspaceId: string,
+    orgId?: string,
 ): Promise<ClientMetrics | null> {
-    const workspace = await (prisma as any).clientWorkspace.findUnique({
-        where: { id: workspaceId },
+    const workspace = await (prisma as any).clientWorkspace.findFirst({
+        where: { id: workspaceId, ...(orgId ? { organizationId: orgId } : {}) },
         include: {
             // Include related data via assessmentId/proposalId
         }
@@ -56,7 +58,12 @@ export async function extractClientMetrics(
     if (!roi || !assessment) return null;
 
     // Count tasks and modules
-    const tasks = await (prisma as any).implementationTask.count({ where: { workspaceId } });
+    const tasks = await (prisma as any).implementationTask.count({
+        where: {
+            workspaceId,
+            organizationId: workspace.organizationId,
+        },
+    });
     const modules = (() => {
         try { return JSON.parse(workspace.modulesEnabled); }
         catch { return []; }
@@ -85,11 +92,22 @@ export async function extractClientMetrics(
 // ─── Core Generator ───────────────────────────────────────────────────────────
 
 async function callAI(prompt: string): Promise<any> {
-    const { text } = await generateText({
-        model: openai("gpt-4o-mini"),
-        prompt,
-        maxOutputTokens: 1400,
-    });
+    assertAIEngineAvailable();
+
+    let text = "";
+    try {
+        const response = await generateText({
+            model: openai("gpt-4o-mini"),
+            prompt,
+            maxOutputTokens: 1400,
+        });
+        text = response.text;
+    } catch (error) {
+        if (isAIUnavailableError(error)) {
+            throw toAIUnavailableError(error);
+        }
+        throw error;
+    }
 
     try {
         return JSON.parse(text.replace(/```json\n?/g, "").replace(/```\n?/g, "").trim());
@@ -107,7 +125,7 @@ export async function generateAuthorityAsset(
     orgId: string,
 ): Promise<any> {
     // 1. Extract real metrics
-    const rawMetrics = await extractClientMetrics(workspaceId);
+    const rawMetrics = await extractClientMetrics(workspaceId, orgId);
     if (!rawMetrics) throw new Error("Insufficient data for this workspace");
 
     // 2. Anonymize

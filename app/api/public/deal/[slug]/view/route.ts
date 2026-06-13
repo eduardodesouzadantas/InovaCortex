@@ -1,3 +1,4 @@
+import { withApiLogging } from "@/lib/logger";
 /**
  * app/api/public/deal/[slug]/view/route.ts
  * V21: Public endpoint — records DealSignal "dossier_viewed" (client-triggered).
@@ -8,7 +9,7 @@ import { NextRequest, NextResponse } from "next/server";
 
 interface Params { params: Promise<{ slug: string }> }
 
-export async function POST(req: NextRequest, { params }: Params) {
+async function POSTHandler(req: NextRequest, { params }: Params) {
     try {
         const { prisma } = await import("@/lib/prisma");
 
@@ -41,3 +42,5 @@ export async function POST(req: NextRequest, { params }: Params) {
         return NextResponse.json({ ok: false }, { status: 500 });
     }
 }
+
+export const POST = withApiLogging("/api/public/deal/[slug]/view", "POST", POSTHandler);

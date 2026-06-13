@@ -1,3 +1,4 @@
+import { withApiLogging } from "@/lib/logger";
 import { NextRequest, NextResponse } from "next/server";
 import { requireAdminApiAccess } from "@/lib/auth/admin-api-guard";
 import {
@@ -8,7 +9,7 @@ import {
 
 export const runtime = "nodejs";
 
-export async function POST(
+async function POSTHandler(
     request: NextRequest,
     { params }: { params: Promise<{ id: string }> },
 ) {
@@ -24,7 +25,7 @@ export async function POST(
     return generateProposalHandler(id);
 }
 
-export async function GET(
+async function GETHandler(
     request: NextRequest,
     { params }: { params: Promise<{ id: string }> },
 ) {
@@ -40,7 +41,7 @@ export async function GET(
     return listProposalsHandler(id);
 }
 
-export async function PATCH(
+async function PATCHHandler(
     request: NextRequest,
     { params }: { params: Promise<{ id: string }> },
 ) {
@@ -55,3 +56,7 @@ export async function PATCH(
     const { id } = await params;
     return updateProposalHandler(request, id);
 }
+
+export const POST = withApiLogging("/api/agency/commercial/leads/[id]/proposal", "POST", POSTHandler);
+export const GET = withApiLogging("/api/agency/commercial/leads/[id]/proposal", "GET", GETHandler);
+export const PATCH = withApiLogging("/api/agency/commercial/leads/[id]/proposal", "PATCH", PATCHHandler);

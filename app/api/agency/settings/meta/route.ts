@@ -1,3 +1,4 @@
+import { withApiLogging } from "@/lib/logger";
 import { NextRequest, NextResponse } from "next/server";
 import { requireAdminApiAccess } from "@/lib/auth/admin-api-guard";
 import { writeAuditEvent } from "@/lib/audit";
@@ -5,7 +6,7 @@ import { listMaskedMetaSettings, sanitizeMetaSettingInputs, upsertMetaSettings }
 
 export const runtime = "nodejs";
 
-export async function GET(request: NextRequest) {
+async function GETHandler(request: NextRequest) {
     const access = await requireAdminApiAccess(request, {
         requiredRole: "admin",
         allowLegacyTokenFallback: false,
@@ -17,7 +18,7 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ settings }, { status: 200 });
 }
 
-export async function POST(request: NextRequest) {
+async function POSTHandler(request: NextRequest) {
     const access = await requireAdminApiAccess(request, {
         requiredRole: "admin",
         allowLegacyTokenFallback: false,
@@ -47,3 +48,6 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json({ success: true, updatedKeys: result.updatedKeys }, { status: 200 });
 }
+
+export const GET = withApiLogging("/api/agency/settings/meta", "GET", GETHandler);
+export const POST = withApiLogging("/api/agency/settings/meta", "POST", POSTHandler);

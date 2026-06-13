@@ -16,23 +16,26 @@ export type RepRole = "SDR" | "Closer" | "CS";
  */
 export async function assignLead({
     assessmentId,
+    orgId,
     salesRepId,
     assignedByUserId,
 }: {
     assessmentId: string;
+    orgId: string;
     salesRepId: string;
     assignedByUserId?: string;
 }) {
     return prisma.$transaction(async (tx: any) => {
         // Close any existing active assignment
         await tx.leadAssignment.updateMany({
-            where: { assessmentId, status: "active" },
+            where: { organizationId: orgId, assessmentId, status: "active" },
             data: { status: "reassigned", updatedAt: new Date() },
         });
 
         // Create new assignment
         const assignment = await tx.leadAssignment.create({
             data: {
+                organizationId: orgId,
                 assessmentId,
                 salesRepId,
                 assignedByUserId: assignedByUserId ?? null,
@@ -78,7 +81,8 @@ export async function autoAssign({
     // Find the rep of that role with the fewest active assignments (load balancing)
     const reps = await (prisma as any).salesRep.findMany({
         where: { organizationId: orgId, role: targetRole, active: true },
-        include: {
+        select: {
+            id: true,
             _count: { select: { assignments: { where: { status: "active" } } } },
         },
         orderBy: { createdAt: "asc" },
@@ -97,6 +101,7 @@ export async function autoAssign({
 
     return assignLead({
         assessmentId,
+        orgId,
         salesRepId: rep.id,
         assignedByUserId: undefined, // null = auto
     });
@@ -115,19 +120,34 @@ function classificationToRole(classification: string): RepRole | null {
 /**
  * Get the current active assignment for a lead (if any).
  */
-export async function getActiveAssignment(assessmentId: string) {
+export async function getActiveAssignment(orgId: string, assessmentId: string) {
     return (prisma as any).leadAssignment.findFirst({
-        where: { assessmentId, status: "active" },
-        include: { salesRep: true },
+        where: { organizationId: orgId, assessmentId, status: "active" },
+        select: {
+            id: true,
+            assessmentId: true,
+            salesRepId: true,
+            status: true,
+            assignedAt: true,
+            updatedAt: true,
+            salesRep: {
+                select: {
+                    id: true,
+                    name: true,
+                    email: true,
+                    role: true,
+                },
+            },
+        },
     });
 }
 
 /**
  * Get all active assignments for a rep.
  */
-export async function getRepAssignments(salesRepId: string) {
+export async function getRepAssignments(orgId: string, salesRepId: string) {
     return (prisma as any).leadAssignment.findMany({
-        where: { salesRepId, status: "active" },
+        where: { organizationId: orgId, salesRepId, status: "active" },
         include: { assessment: { select: { id: true, company: true, classification: true, status: true } } },
         orderBy: { assignedAt: "desc" },
     });

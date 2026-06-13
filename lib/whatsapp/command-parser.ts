@@ -1,27 +1,27 @@
-import { CommandEngine } from "@/lib/ai/command-engine";
+import type { ChatAnswer } from "@/lib/ai/chat-engine";
+import type { CommandResult } from "@/lib/ai/command-engine";
 import { ChatEngine } from "@/lib/ai/chat-engine";
+import { CommandEngine } from "@/lib/ai/command-engine";
 import { sendWhatsAppMessage } from "@/lib/whatsapp";
 import { logger } from "@/lib/logger";
-import { buildWhatsAppResponse, buildChatResponse, buildErrorMessage } from "./response-builder";
+import { buildChatResponse, buildErrorMessage, buildWhatsAppResponse } from "./response-builder";
 import { canExecuteCommand, getDeniedMessage, type WhatsAppRole } from "./rbac";
 
-/**
- * WhatsApp Command Parser & Router (V34)
- *
- * Supported commands:
- *   /revenue   /leaks     /today    /pipeline
- *   /growth    /playbook  /client   /objections
- *   /test-strategy        /help
- *
- * Anything else → ChatEngine (free-form)
- */
-
-// All valid commands (used for autocomplete suggestions in /help)
 const KNOWN_COMMANDS = [
-    "/revenue", "/leaks", "/today", "/pipeline",
-    "/growth", "/playbook", "/client", "/objections",
-    "/strategy", "/experiment", "/focus", "/help", "/run"
-];
+    "/revenue",
+    "/leaks",
+    "/today",
+    "/pipeline",
+    "/growth",
+    "/playbook",
+    "/client",
+    "/objections",
+    "/strategy",
+    "/experiment",
+    "/focus",
+    "/help",
+    "/run",
+] as const;
 
 export interface ParsedInput {
     type: "command" | "chat";
@@ -30,61 +30,44 @@ export interface ParsedInput {
     raw: string;
 }
 
-/**
- * Parse a raw WhatsApp message into a typed ParsedInput.
- */
+function normalizeWhatsAppRole(role: string): WhatsAppRole {
+    if (role === "ceo") return "ceo";
+    if (role === "admin" || role === "owner") return "admin";
+    return "sales";
+}
+
 export function parseWhatsAppInput(text: string): ParsedInput {
     const trimmed = text.trim();
+    if (!trimmed.startsWith("/")) return { type: "chat", raw: trimmed };
 
-    if (!trimmed.startsWith("/")) {
-        return { type: "chat", raw: trimmed };
-    }
-
-    // Find the command token (first word)
     const spaceIdx = trimmed.indexOf(" ");
     const command = spaceIdx === -1 ? trimmed.toLowerCase() : trimmed.slice(0, spaceIdx).toLowerCase();
     const args = spaceIdx === -1 ? undefined : trimmed.slice(spaceIdx + 1).trim() || undefined;
-
     return { type: "command", command, args, raw: trimmed };
 }
 
-/**
- * Format a CommandEngine output for WhatsApp.
- * Delegates to the shared response-builder.
- */
-function formatCommand(result: any): string {
+function formatCommand(result: CommandResult): string {
     return buildWhatsAppResponse(result);
 }
 
-/**
- * Format a ChatEngine output for WhatsApp.
- * Delegates to the shared response-builder.
- */
-function formatChat(result: any): string {
+function formatChat(result: ChatAnswer): string {
     return buildChatResponse(result);
 }
 
-/**
- * Suggest closest command when an unknown /cmd is typed.
- */
 function suggestCommand(unknown: string): string {
-    // Find if any known command starts similarly
-    const match = KNOWN_COMMANDS.find(c => c.startsWith(unknown.slice(0, 4)));
+    const match = KNOWN_COMMANDS.find((command) => command.startsWith(unknown.slice(0, 4)));
     return match
-        ? `❓ Comando *${unknown}* não encontrado.\n\n💡 Você quis dizer *${match}*?\n\nDigite */help* para ver todos os comandos.`
-        : `❓ Comando *${unknown}* não reconhecido.\n\nDigite */help* para ver todos os comandos disponíveis.`;
+        ? `Comando *${unknown}* nao encontrado.\n\nVoce quis dizer *${match}*?\n\nDigite */help* para ver todos os comandos.`
+        : `Comando *${unknown}* nao reconhecido.\n\nDigite */help* para ver todos os comandos disponiveis.`;
 }
 
-/**
- * Main entry point: parse → route → send reply.
- */
 export async function routeWhatsAppMessage({
     from,
     text,
     orgId,
     userId,
     role,
-    sessionId
+    sessionId,
 }: {
     from: string;
     text: string;
@@ -94,47 +77,40 @@ export async function routeWhatsAppMessage({
     sessionId: string;
 }) {
     const parsed = parseWhatsAppInput(text);
+    const whatsappRole = normalizeWhatsAppRole(role);
 
     try {
-        // ── COMMAND PATH ────────────────────────────────────────────────────────
         if (parsed.type === "command" && parsed.command) {
-            // Validate against known commands
-            if (!KNOWN_COMMANDS.includes(parsed.command)) {
+            if (!KNOWN_COMMANDS.includes(parsed.command as typeof KNOWN_COMMANDS[number])) {
                 await sendWhatsAppMessage(from, suggestCommand(parsed.command));
                 return;
             }
 
-            // RBAC enforcement
-            if (!canExecuteCommand(role as WhatsAppRole, parsed.command)) {
-                await sendWhatsAppMessage(from, getDeniedMessage(parsed.command, role as WhatsAppRole));
+            if (!canExecuteCommand(whatsappRole, parsed.command)) {
+                await sendWhatsAppMessage(from, getDeniedMessage(parsed.command, whatsappRole));
                 return;
             }
 
             logger.info(`WhatsApp command: ${parsed.command} [${from}] role:${role}`);
-
-            const result = await CommandEngine.executeCommand(
-                orgId, userId, role,
-                parsed.command,
-                parsed.args
-            );
-
+            const result = await CommandEngine.executeCommand(orgId, userId, role, parsed.command, parsed.args);
             await sendWhatsAppMessage(from, formatCommand(result));
             return;
         }
 
-        // ── CHAT PATH ───────────────────────────────────────────────────
         logger.info(`WhatsApp chat: "${text.slice(0, 40)}..." [${from}]`);
-
         const result = await ChatEngine.answerChat(
-            orgId, sessionId, userId,
-            role as "admin" | "ceo",
-            text.trim()
+            orgId,
+            sessionId,
+            userId,
+            role === "ceo" ? "ceo" : "admin",
+            text.trim(),
         );
 
         await sendWhatsAppMessage(from, formatChat(result));
-
-    } catch (error: any) {
-        logger.error(`WhatsApp router error: ${error.message}`);
+    } catch (error: unknown) {
+        logger.error("WhatsApp router error", {
+            error: error instanceof Error ? error.message : String(error),
+        });
         await sendWhatsAppMessage(from, buildErrorMessage("internal"));
     }
 }

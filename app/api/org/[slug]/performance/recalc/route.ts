@@ -1,11 +1,17 @@
 
 import { NextResponse } from "next/server";
 import { requireOrgContext } from "@/lib/auth/org-context";
-import { assertRole } from "@/lib/auth/rbac";
+import {
+    assertTenantRole,
+    invalidTenantInputResponse,
+    resolveTenantRouteError,
+} from "@/lib/auth/tenant-route";
 import { prisma } from "@/lib/prisma";
-import { logger } from "@/lib/logger";
+import { logger, withApiLogging } from "@/lib/logger";
 
-export async function POST(
+const WINDOW_OPTIONS = new Set(["7d", "30d", "90d"]);
+
+async function POSTHandler(
     req: Request,
     { params }: { params: Promise<{ slug: string }> }
 ) {
@@ -14,10 +20,13 @@ export async function POST(
     const window = searchParams.get("window") || "30d";
 
     try {
+        if (!WINDOW_OPTIONS.has(window)) {
+            return invalidTenantInputResponse("window must be one of: 7d, 30d, 90d");
+        }
         const ctx = await requireOrgContext(slug);
-        assertRole(ctx.role, "admin");
+        assertTenantRole(ctx.role, "admin");
 
-        const task = await (prisma as any).actionQueue.create({
+        const task = await prisma.actionQueue.create({
             data: {
                 organizationId: ctx.orgId,
                 type: "performance_recalc",
@@ -34,7 +43,9 @@ export async function POST(
             taskId: task.id,
             status: "pending"
         });
-    } catch (err: any) {
-        return NextResponse.json({ error: err.message }, { status: err.message === "FORBIDDEN" ? 403 : 401 });
+    } catch (err) {
+        return resolveTenantRouteError(err, "Failed to enqueue performance recalculation");
     }
 }
+
+export const POST = withApiLogging("/api/org/[slug]/performance/recalc", "POST", POSTHandler);

@@ -1,14 +1,16 @@
+import { withApiLogging } from "@/lib/logger";
 /* eslint-disable @typescript-eslint/no-explicit-any */
 export const runtime = "nodejs";
 
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { calculateScore, AssessmentPayload } from "@/lib/scoring";
+import { calculateScore } from "@/lib/scoring";
 import { prisma } from "@/lib/prisma";
 import crypto from "crypto";
 import { calculateROI } from "@/lib/roi-engine";
 import { checkAssessmentLimit, LimitExceededError } from "@/lib/auth/limits";
 import { sendAssessmentDossierWhatsApp } from "@/lib/whatsapp/assessment-send";
+import { ensureAssessmentCommercialFlow } from "@/lib/commercial/canonical-flow";
 
 // In-memory rate limiting and rudimentary spam protection
 const rateLimitMap = new Map<string, { count: number; lastModified: number }>();
@@ -52,11 +54,9 @@ const assessmentSchema = z.object({
     honeypot: z.string().optional() // Anti-spam
 });
 
-export async function POST(request: Request) {
+async function POSTHandler(request: Request) {
     try {
         // Basic IP tracking for rate limiting
-        // Note: get('x-forwarded-for') is a common header for client IP when behind proxies.
-        // If not present, we fall back to a generic identifier in this V1.
         const ip = request.headers.get("x-forwarded-for") || "unknown-ip";
 
         const now = Date.now();
@@ -133,7 +133,7 @@ export async function POST(request: Request) {
             goal: validatedData.goal,
         };
 
-        const scoreResult = calculateScore(payload);
+        const scoreResult = (calculateScore as any)(payload);
 
         // --- Generate Artifact Report Content ---
         const publicSlug = crypto.randomUUID();
@@ -277,6 +277,12 @@ export async function POST(request: Request) {
                 }
             });
 
+            await ensureAssessmentCommercialFlow({
+                assessmentId: newAssessment.id,
+                source: "assessment",
+                db: tx as any,
+            });
+
             await (tx as any).auditEvent.create({
                 data: {
                     assessmentId: newAssessment.id,
@@ -295,8 +301,6 @@ export async function POST(request: Request) {
 
         // 4.5. Trigger WhatsApp Loop V3 (async, non-blocking)
         if (assessment.whatsappConsent && assessment.phone) {
-            // Note: Em produção real isso deve ir pra uma Queue/Worker. 
-            // Para V3, chamamos diretamente o helper para evitar acoplamento com rota legacy.
             void sendAssessmentDossierWhatsApp({ assessmentId: assessment.id });
         }
 
@@ -318,7 +322,8 @@ export async function POST(request: Request) {
         if (error instanceof z.ZodError) {
             return NextResponse.json({ error: "Validation failed", details: (error as any).issues }, { status: 400 });
         }
-        console.error("[Assesment POST API Error]", error);
-        return NextResponse.json({ error: "Internal Server Error" }, { status: 500 });
+        throw error;
     }
 }
+
+export const POST = withApiLogging("/api/assessment", "POST", POSTHandler);

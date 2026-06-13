@@ -1,14 +1,15 @@
-/**
- * app/api/agency/builder/run/[id]/reject/route.ts
- * V26: Agency Builder canonical reject endpoint.
- */
-
 import { NextRequest, NextResponse } from "next/server";
 import { getAgencyOrgSlug } from "@/lib/auth/session";
 import { checkBuilderAccess, isValidTransition } from "@/lib/builder/builder-guard";
 import { logBuilderAudit } from "@/lib/builder/builder-orchestrator";
+import { withApiLogging } from "@/lib/logger";
+import { prisma } from "@/lib/prisma";
 
-export async function POST(
+type RejectRunBody = {
+    reason?: string;
+};
+
+async function POSTHandler(
     req: NextRequest,
     { params }: { params: Promise<{ id: string }> },
 ) {
@@ -17,22 +18,26 @@ export async function POST(
 
     let reason = "";
     try {
-        const body = await req.json().catch(() => ({}));
-        reason = body?.reason ?? "";
-    } catch { }
+        const body = await req.json().catch(() => ({} as RejectRunBody));
+        reason = typeof body.reason === "string" ? body.reason : "";
+    } catch {
+        reason = "";
+    }
 
     const guard = await checkBuilderAccess(slug, req);
     if (!guard.allowed) {
         return NextResponse.json({ error: guard.reason }, { status: guard.status });
     }
 
-    const { prisma } = await import("@/lib/prisma");
-    const run = await (prisma as any).buildRun.findUnique({ where: { id } });
+    const run = await prisma.buildRun.findUnique({
+        where: { id },
+        select: { id: true, orgId: true, status: true },
+    });
+
     if (!run) return NextResponse.json({ error: "Run not found" }, { status: 404 });
     if (run.orgId !== guard.orgId) {
         return NextResponse.json({ error: "Org mismatch" }, { status: 403 });
     }
-
     if (!isValidTransition(run.status, "draft")) {
         return NextResponse.json(
             { error: `Cannot reject run in status "${run.status}"` },
@@ -40,7 +45,7 @@ export async function POST(
         );
     }
 
-    await (prisma as any).buildRun.update({
+    await prisma.buildRun.update({
         where: { id },
         data: {
             status: "draft",
@@ -49,7 +54,13 @@ export async function POST(
         },
     });
 
-    await logBuilderAudit(guard.orgId, id, "builderRejected", { rejectedBy: "agency_session", reason, slug });
+    await logBuilderAudit(guard.orgId, id, "builderRejected", {
+        rejectedBy: "agency_session",
+        reason,
+        slug,
+    });
 
     return NextResponse.json({ ok: true, status: "draft", reason });
 }
+
+export const POST = withApiLogging("/api/agency/builder/run/[id]/reject", "POST", POSTHandler);

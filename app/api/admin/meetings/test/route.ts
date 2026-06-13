@@ -1,9 +1,10 @@
+import { withApiLogging } from "@/lib/logger";
 import { NextResponse } from "next/server";
 import { MeetingIntelligenceService } from "@/lib/services/meeting-intelligence";
 import { getSession } from "@/lib/auth/session";
 import { can } from "@/lib/auth/rbac";
 
-export async function POST(req: Request) {
+async function POSTHandler(req: Request) {
     try {
         const session = await getSession();
         if (!session || !can(session.role, "manageSettings")) {
@@ -33,3 +34,5 @@ export async function POST(req: Request) {
         return NextResponse.json({ error: e.message }, { status: 500 });
     }
 }
+
+export const POST = withApiLogging("/api/admin/meetings/test", "POST", POSTHandler);

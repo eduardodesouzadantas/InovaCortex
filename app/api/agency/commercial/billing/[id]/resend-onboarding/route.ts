@@ -1,10 +1,11 @@
+import { withApiLogging } from "@/lib/logger";
 import { NextRequest, NextResponse } from "next/server";
 import { requireAdminApiAccess } from "@/lib/auth/admin-api-guard";
 import { resendBillingOnboardingHandler } from "@/lib/agency/commercial/billing";
 
 export const runtime = "nodejs";
 
-export async function POST(
+async function POSTHandler(
     request: NextRequest,
     { params }: { params: Promise<{ id: string }> },
 ) {
@@ -19,3 +20,5 @@ export async function POST(
     const { id } = await params;
     return resendBillingOnboardingHandler(id);
 }
+
+export const POST = withApiLogging("/api/agency/commercial/billing/[id]/resend-onboarding", "POST", POSTHandler);

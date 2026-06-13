@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { logAudit, writeAuditEvent } from "@/lib/audit";
-import { logger } from "@/lib/logger";
+import { logger, withApiLogging } from "@/lib/logger";
 import { generateContract } from "@/lib/contract-engine";
 import { createCheckoutForProposal } from "@/lib/billing";
 import { sendWhatsAppMessage } from "@/lib/whatsapp";
@@ -19,7 +19,7 @@ export const runtime = "nodejs";
  *
  * Anti-chaos: WhatsApp/Stripe failures are non-fatal — proposal accept still succeeds.
  */
-export async function POST(
+async function POSTHandler(
     request: NextRequest,
     { params }: { params: Promise<{ slug: string }> }
 ) {
@@ -205,3 +205,5 @@ export async function POST(
         workspaceId,
     });
 }
+
+export const POST = withApiLogging("/api/proposta/[slug]/respond", "POST", POSTHandler);

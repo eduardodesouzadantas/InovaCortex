@@ -1,3 +1,4 @@
+import { withApiLogging } from "@/lib/logger";
 import { NextRequest, NextResponse } from "next/server";
 import { getOrgContextFromSession } from "@/lib/auth/org-context";
 import { getSessionFromRequest } from "@/lib/auth/session";
@@ -11,7 +12,7 @@ import { runWorkspaceNudgeHandler } from "@/lib/agency/commercial/workspaces";
 
 export const runtime = "nodejs";
 
-export async function POST(req: NextRequest) {
+async function POSTHandler(req: NextRequest) {
     try {
         const redirectResponse = createLegacyAdminFinalRedirectResponse(req, {
             successorPath: "/api/agency/commercial/workspaces/nudge",
@@ -37,3 +38,5 @@ export async function POST(req: NextRequest) {
         return NextResponse.json({ error: "Falha na acao" }, { status: 500 });
     }
 }
+
+export const POST = withApiLogging("/api/admin/workspaces/nudge", "POST", POSTHandler);

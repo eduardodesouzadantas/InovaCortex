@@ -556,7 +556,8 @@ function buildSettings(snap: InputSnapshot, intgKeys: Set<string>): Setting[] {
         { key: "OPENAI_API_KEY", defaultValue: "", required: true, description: "OpenAI API key for AI agents" },
         { key: "ADMIN_SECRET_TOKEN", defaultValue: "", required: true, description: "Admin API secret token" },
         { key: "NEXTAUTH_SECRET", defaultValue: "", required: true, description: "NextAuth session secret" },
-        { key: "DATABASE_URL", defaultValue: "file:./dev.db", required: true, description: "Prisma DB connection string" },
+        { key: "DATABASE_URL", defaultValue: "", required: true, description: "Supabase pooled Prisma connection string" },
+        { key: "DIRECT_URL", defaultValue: "", required: true, description: "Direct Postgres connection string for Prisma migrations" },
         { key: "NEXT_PUBLIC_APP_URL", defaultValue: "http://localhost:3000", required: true, description: "Public app URL" },
     ];
     if (intgKeys.has("meta_whatsapp")) {

@@ -75,6 +75,7 @@ describe("AgencyOrganizationDetailPage", () => {
                     createdAt: "2026-03-16T10:05:00.000Z",
                 },
             ],
+            invites: [],
             workspaces: [
                 {
                     id: "ws-1",
@@ -99,9 +100,10 @@ describe("AgencyOrganizationDetailPage", () => {
         expect(html).toContain("Trial");
         expect(html).toContain("Suspender organizacao");
         expect(html).toContain("Nome");
-        expect(html).toContain("Último acesso");
+        expect(html).toContain("Ultimo acesso");
         expect(html).toContain("admin@acme.com");
         expect(html).toContain("Desativar usuario");
+        expect(html).toContain("Convidar usuario");
         expect(html).toContain("/agency/commercial/workspaces/ws-1");
     });
 
@@ -141,6 +143,7 @@ describe("AgencyOrganizationDetailPage", () => {
                 workspaces: 0,
             },
             users: [],
+            invites: [],
             workspaces: [],
         });
 

@@ -1,36 +1,34 @@
+import { withApiLogging } from "@/lib/logger";
 /**
  * Legacy adapter: /api/org/[slug]/builder/templates -> /api/agency/builder/templates
  */
 
-import { NextRequest, NextResponse } from "next/server";
+import { NextRequest } from "next/server";
 import { GET as AgencyGET, PATCH as AgencyPATCH } from "@/app/api/agency/builder/templates/route";
 import {
     applyLegacyBuilderDeprecationHeaders,
-    isAgencyBuilderSlug,
+    ensureLegacyBuilderSlug,
 } from "@/lib/builder/agency-builder-scope";
 
-function ensureLegacySlug(slug: string): NextResponse | null {
-    if (isAgencyBuilderSlug(slug)) return null;
-    return NextResponse.json({ error: "Builder moved to agency scope" }, { status: 403 });
-}
-
-export async function GET(
+async function GETHandler(
     req: NextRequest,
     { params }: { params: Promise<{ slug: string }> },
 ) {
     const { slug } = await params;
-    const blocked = ensureLegacySlug(slug);
-    if (blocked) return applyLegacyBuilderDeprecationHeaders(blocked);
+    const blocked = ensureLegacyBuilderSlug(slug);
+    if (blocked) return blocked;
     return applyLegacyBuilderDeprecationHeaders(await AgencyGET(req));
 }
 
-export async function PATCH(
+async function PATCHHandler(
     req: NextRequest,
     { params }: { params: Promise<{ slug: string }> },
 ) {
     const { slug } = await params;
-    const blocked = ensureLegacySlug(slug);
-    if (blocked) return applyLegacyBuilderDeprecationHeaders(blocked);
+    const blocked = ensureLegacyBuilderSlug(slug);
+    if (blocked) return blocked;
     return applyLegacyBuilderDeprecationHeaders(await AgencyPATCH(req));
 }
 
+export const GET = withApiLogging("/api/org/[slug]/builder/templates", "GET", GETHandler);
+export const PATCH = withApiLogging("/api/org/[slug]/builder/templates", "PATCH", PATCHHandler);

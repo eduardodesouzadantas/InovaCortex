@@ -1,31 +1,46 @@
+import { withApiLogging } from "@/lib/logger";
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { getSession } from "@/lib/auth/session";
 import { getCommissionSummary } from "@/lib/sales/stats-engine";
+import { buildPaginationMeta, parsePagination } from "@/lib/http/pagination";
+import { orgContextErrorResponse, requireOrgContext } from "@/lib/auth/org-context";
 
-const getOrg = async (slug: string) =>
-    prisma.organization.findUnique({ where: { slug }, select: { id: true } });
+async function GETHandler(req: Request, { params }: { params: Promise<{ slug: string }> }) {
+    const { slug } = await params;
+    const ctx = await requireOrgContext(slug).catch((error) => error);
+    if (ctx instanceof Error) return orgContextErrorResponse(ctx);
 
-export async function GET(req: Request, { params }: { params: Promise<{ slug: string }> }) {
-    const session = await getSession();
-    if (!session || session.orgSlug !== (await params).slug) return NextResponse.json({ error: "UNAUTHORIZED" }, { status: 401 });
-    const org = await getOrg((await params).slug);
-    if (!org) return NextResponse.json({ error: "Not found" }, { status: 404 });
-
-    const month = new URL(req.url).searchParams.get("month") || new Date().toISOString().slice(0, 7);
-    const summary = await getCommissionSummary(org.id, month);
-    return NextResponse.json({ summary, month });
+    const searchParams = new URL(req.url).searchParams;
+    const month = searchParams.get("month") || new Date().toISOString().slice(0, 7);
+    const pagination = parsePagination(searchParams, { defaultLimit: 25, maxLimit: 100 });
+    const summary = await getCommissionSummary(ctx.orgId, month);
+    return NextResponse.json({
+        summary: summary.slice(pagination.skip, pagination.skip + pagination.limit),
+        month,
+        pagination: buildPaginationMeta({ ...pagination, total: summary.length }),
+    });
 }
 
 // PATCH — mark payout as paid
-export async function PATCH(req: Request, { params }: { params: Promise<{ slug: string }> }) {
-    const session = await getSession();
-    if (!session || session.orgSlug !== (await params).slug) return NextResponse.json({ error: "UNAUTHORIZED" }, { status: 401 });
+async function PATCHHandler(req: Request, { params }: { params: Promise<{ slug: string }> }) {
+    const { slug } = await params;
+    const ctx = await requireOrgContext(slug).catch((error) => error);
+    if (ctx instanceof Error) return orgContextErrorResponse(ctx);
     const { payoutId } = await req.json();
 
     const payout = await (prisma as any).commissionPayout.update({
         where: { id: payoutId },
-        data: { status: "paid", paidAt: new Date() }
+        data: { status: "paid", paidAt: new Date() },
+        select: {
+            id: true,
+            salesRepId: true,
+            status: true,
+            paidAt: true,
+            amountCents: true,
+        },
     });
     return NextResponse.json({ payout });
 }
+
+export const GET = withApiLogging("/api/org/[slug]/sales/commissions", "GET", GETHandler);
+export const PATCH = withApiLogging("/api/org/[slug]/sales/commissions", "PATCH", PATCHHandler);

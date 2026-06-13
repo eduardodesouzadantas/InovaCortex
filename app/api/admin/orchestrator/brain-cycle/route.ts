@@ -1,3 +1,4 @@
+import { withApiLogging } from "@/lib/logger";
 import { NextRequest, NextResponse } from "next/server";
 import {
     applyLegacyAdminApiDeprecationHeaders,
@@ -15,7 +16,7 @@ function respond(mode: "session" | "legacy_admin_token", body: unknown, init?: R
     });
 }
 
-export async function POST(request: NextRequest) {
+async function POSTHandler(request: NextRequest) {
     const redirectResponse = createLegacyAdminFinalRedirectResponse(request, {
         successorPath: "/api/agency/monitoring/orchestrator/brain-cycle",
     });
@@ -47,3 +48,5 @@ export async function POST(request: NextRequest) {
     const result = await runAgencyBrainCycle(orgId);
     return respond(access.mode, result);
 }
+
+export const POST = withApiLogging("/api/admin/orchestrator/brain-cycle", "POST", POSTHandler);

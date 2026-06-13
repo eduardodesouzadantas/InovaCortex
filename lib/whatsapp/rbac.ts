@@ -39,7 +39,7 @@ export interface WhatsAppActor {
  * Returns null if not found or inactive.
  */
 export async function resolveActor(phone: string): Promise<WhatsAppActor | null> {
-    const waUser = await (prisma as any).whatsAppUser.findFirst({
+    const waUser = await prisma.whatsAppUser.findFirst({
         where: { phoneNumber: phone, active: true },
         include: {
             organization: { select: { id: true, slug: true } }
@@ -65,6 +65,7 @@ export async function resolveActor(phone: string): Promise<WhatsAppActor | null>
  */
 export function canExecuteCommand(role: WhatsAppRole, command: string): boolean {
     if (role === "ceo" || role === "admin") return true;
+    if (EXECUTIVE_COMMANDS.has(command)) return false;
     // sales: only public commands
     if (PUBLIC_COMMANDS.has(command)) return true;
     return false;
@@ -111,7 +112,7 @@ export async function upsertWhatsAppUser({
     name?: string;
     userId?: string;
 }) {
-    return (prisma as any).whatsAppUser.upsert({
+    return prisma.whatsAppUser.upsert({
         where: { phoneNumber_organizationId: { phoneNumber, organizationId: orgId } },
         update: { role, name, userId, active: true, updatedAt: new Date() },
         create: { phoneNumber, organizationId: orgId, role, name, userId }
@@ -122,7 +123,7 @@ export async function upsertWhatsAppUser({
  * Revoke (deactivate) a WhatsApp user.
  */
 export async function revokeWhatsAppUser(phoneNumber: string, orgId: string) {
-    return (prisma as any).whatsAppUser.updateMany({
+    return prisma.whatsAppUser.updateMany({
         where: { phoneNumber, organizationId: orgId },
         data: { active: false }
     });
@@ -132,7 +133,7 @@ export async function revokeWhatsAppUser(phoneNumber: string, orgId: string) {
  * List all WhatsApp users for an org.
  */
 export async function listWhatsAppUsers(orgId: string) {
-    return (prisma as any).whatsAppUser.findMany({
+    return prisma.whatsAppUser.findMany({
         where: { organizationId: orgId },
         orderBy: [{ role: "asc" }, { createdAt: "asc" }]
     });

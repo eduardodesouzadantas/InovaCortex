@@ -1,3 +1,4 @@
+import { withApiLogging } from "@/lib/logger";
 import { NextRequest, NextResponse } from "next/server";
 import {
     applyLegacyAdminApiDeprecationHeaders,
@@ -13,7 +14,7 @@ export const runtime = "nodejs";
  * GET /api/admin/leads/[id]/roi
  * Returns ROI projection for a lead.
  */
-export async function GET(
+async function GETHandler(
     req: NextRequest,
     { params }: { params: Promise<{ id: string }> },
 ) {
@@ -42,7 +43,7 @@ export async function GET(
  * Simulate adjusted ROI with custom parameters and save as manualOverride.
  * Body: { avgHourlyCost?, avgTicket?, conversionRate? }
  */
-export async function PATCH(
+async function PATCHHandler(
     request: NextRequest,
     { params }: { params: Promise<{ id: string }> },
 ) {
@@ -71,3 +72,6 @@ export async function PATCH(
         mode: access.mode,
     });
 }
+
+export const GET = withApiLogging("/api/admin/leads/[id]/roi", "GET", GETHandler);
+export const PATCH = withApiLogging("/api/admin/leads/[id]/roi", "PATCH", PATCHHandler);

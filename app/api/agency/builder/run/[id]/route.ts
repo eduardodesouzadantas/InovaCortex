@@ -1,14 +1,22 @@
-/**
- * app/api/agency/builder/run/[id]/route.ts
- * V26: Agency Builder canonical endpoint for BuildRun detail/status update.
- */
-
+import type { Prisma } from "@prisma/client";
 import { NextRequest, NextResponse } from "next/server";
 import { getAgencyOrgSlug } from "@/lib/auth/session";
 import { checkBuilderAccess, isValidTransition } from "@/lib/builder/builder-guard";
-import { logger } from "@/lib/logger";
+import { logger, withApiLogging } from "@/lib/logger";
+import { prisma } from "@/lib/prisma";
 
-export async function PATCH(
+type BuilderRunDetail = Prisma.BuildRunGetPayload<{
+    include: {
+        artifacts: true;
+    };
+}>;
+
+type UpdateRunBody = {
+    status?: string;
+    outputJson?: string;
+};
+
+async function PATCHHandler(
     req: NextRequest,
     { params }: { params: Promise<{ id: string }> },
 ) {
@@ -17,24 +25,28 @@ export async function PATCH(
     const gate = await checkBuilderAccess(slug, req);
     if (!gate.allowed) return NextResponse.json({ error: gate.reason }, { status: gate.status });
 
-    let body: { status?: string; outputJson?: string };
-    try { body = await req.json(); }
-    catch { return NextResponse.json({ error: "Invalid JSON" }, { status: 400 }); }
-
-    const { prisma } = await import("@/lib/prisma");
-    const run = await (prisma as any).buildRun.findFirst({ where: { id, orgId: gate.orgId } }).catch(() => null);
-    if (!run) return NextResponse.json({ error: "Run not found" }, { status: 404 });
-
-    if (body.status) {
-        if (!isValidTransition(run.status, body.status)) {
-            return NextResponse.json(
-                { error: `Invalid transition: ${run.status} → ${body.status}` },
-                { status: 422 },
-            );
-        }
+    let body: UpdateRunBody;
+    try {
+        body = await req.json();
+    } catch {
+        return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
     }
 
-    const updated = await (prisma as any).buildRun.update({
+    const run = await prisma.buildRun.findFirst({
+        where: { id, orgId: gate.orgId },
+        select: { id: true, status: true },
+    }).catch(() => null);
+
+    if (!run) return NextResponse.json({ error: "Run not found" }, { status: 404 });
+
+    if (body.status && !isValidTransition(run.status, body.status)) {
+        return NextResponse.json(
+            { error: `Invalid transition: ${run.status} -> ${body.status}` },
+            { status: 422 },
+        );
+    }
+
+    const updated = await prisma.buildRun.update({
         where: { id },
         data: {
             ...(body.status ? { status: body.status } : {}),
@@ -47,7 +59,7 @@ export async function PATCH(
     return NextResponse.json({ ok: true, run: updated });
 }
 
-export async function GET(
+async function GETHandler(
     req: NextRequest,
     { params }: { params: Promise<{ id: string }> },
 ) {
@@ -56,12 +68,14 @@ export async function GET(
     const gate = await checkBuilderAccess(slug, req);
     if (!gate.allowed) return NextResponse.json({ error: gate.reason }, { status: gate.status });
 
-    const { prisma } = await import("@/lib/prisma");
-    const run = await (prisma as any).buildRun.findFirst({
+    const run = await prisma.buildRun.findFirst({
         where: { id, orgId: gate.orgId },
         include: { artifacts: true },
-    }).catch(() => null);
-    if (!run) return NextResponse.json({ error: "Not found" }, { status: 404 });
+    }).catch(() => null as BuilderRunDetail | null);
 
+    if (!run) return NextResponse.json({ error: "Not found" }, { status: 404 });
     return NextResponse.json({ ok: true, run });
 }
+
+export const PATCH = withApiLogging("/api/agency/builder/run/[id]", "PATCH", PATCHHandler);
+export const GET = withApiLogging("/api/agency/builder/run/[id]", "GET", GETHandler);

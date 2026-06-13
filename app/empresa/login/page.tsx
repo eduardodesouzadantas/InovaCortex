@@ -11,14 +11,28 @@ export const metadata: Metadata = {
 
 export const dynamic = "force-dynamic";
 
-export default async function EmpresaLoginPage() {
+export default async function EmpresaLoginPage({
+    searchParams,
+}: {
+    searchParams?: Promise<{
+        invite?: string;
+        email?: string;
+    }>;
+} = {}) {
     const auth = await getAuthContext();
     const continueHref = auth.isAuthenticated ? await resolveDefaultRedirect() : null;
+    const resolvedSearchParams = searchParams ? await searchParams : {};
+    const inviteSuccess = resolvedSearchParams.invite === "accepted";
+    const prefilledEmail = typeof resolvedSearchParams.email === "string" ? resolvedSearchParams.email : "";
 
     return (
         <main className="min-h-screen bg-[#050816] text-white">
             <div className="relative mx-auto max-w-7xl px-6 py-8 lg:px-8 lg:py-10">
-                <EmpresaLoginClient continueHref={continueHref} />
+                <EmpresaLoginClient
+                    continueHref={continueHref}
+                    inviteSuccess={inviteSuccess}
+                    initialEmail={prefilledEmail}
+                />
             </div>
         </main>
     );

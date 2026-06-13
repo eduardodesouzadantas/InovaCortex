@@ -1,3 +1,4 @@
+import { withApiLogging } from "@/lib/logger";
 import { NextRequest, NextResponse } from "next/server";
 import { requireAdminApiAccess } from "@/lib/auth/admin-api-guard";
 import { resolveTargetOrgId } from "@/lib/agency/target-org";
@@ -5,7 +6,7 @@ import { readUsageSnapshotOrLive, recalculateUsageSnapshot } from "@/lib/agency/
 
 export const runtime = "nodejs";
 
-export async function POST(request: NextRequest) {
+async function POSTHandler(request: NextRequest) {
     const access = await requireAdminApiAccess(request, {
         requiredRole: "admin",
         allowLegacyTokenFallback: false,
@@ -33,7 +34,7 @@ export async function POST(request: NextRequest) {
     }
 }
 
-export async function GET(request: NextRequest) {
+async function GETHandler(request: NextRequest) {
     const access = await requireAdminApiAccess(request, {
         requiredRole: "admin",
         allowLegacyTokenFallback: false,
@@ -56,3 +57,6 @@ export async function GET(request: NextRequest) {
     const result = await readUsageSnapshotOrLive({ orgId, month });
     return NextResponse.json(result);
 }
+
+export const POST = withApiLogging("/api/agency/costs/usage/recalculate", "POST", POSTHandler);
+export const GET = withApiLogging("/api/agency/costs/usage/recalculate", "GET", GETHandler);

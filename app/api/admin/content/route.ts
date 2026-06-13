@@ -1,11 +1,9 @@
+import { withApiLogging } from "@/lib/logger";
 import { NextRequest, NextResponse } from "next/server";
-import { getSession } from "@/lib/auth/session";
-import { assertRole } from "@/lib/auth/rbac";
 import {
     applyLegacyAdminApiDeprecationHeaders,
-    createLegacyAdminFinalRedirectResponse,
-    createLegacyAdminWriteFrozenResponse,
 } from "@/lib/auth/admin-api-guard";
+import { guardLegacyAdminRequest } from "@/lib/api/legacy-admin-adapter";
 import {
     generateContentHandler,
     listContentArtifactsHandler,
@@ -17,40 +15,28 @@ export const runtime = "nodejs";
 /**
  * Legacy adapter for /api/admin/content -> /api/agency/content
  */
-export async function POST(request: NextRequest) {
-    const redirectResponse = createLegacyAdminFinalRedirectResponse(request, {
+async function POSTHandler(request: NextRequest) {
+    const guarded = await guardLegacyAdminRequest(request, {
         successorPath: "/api/agency/content",
+        requiredRole: "admin",
+        writeOperation: true,
     });
-    if (redirectResponse) return redirectResponse;
-
-    const session = await getSession();
-    if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-
-    try {
-        assertRole(session.role, "admin");
-    } catch {
-        return NextResponse.json({ error: "Forbidden" }, { status: 403 });
-    }
-
-    const frozen = createLegacyAdminWriteFrozenResponse({ successorPath: "/api/agency/content" });
-    if (frozen) return frozen;
+    if (!guarded.ok) return guarded.response;
 
     const body = await request.json();
-    const response = await generateContentHandler(session.orgId, session.userId, body);
+    const response = await generateContentHandler(guarded.organizationId, guarded.userId, body);
     return applyLegacyAdminApiDeprecationHeaders(response, { successorPath: "/api/agency/content" });
 }
 
-export async function GET(request: NextRequest) {
-    const redirectResponse = createLegacyAdminFinalRedirectResponse(request, {
+async function GETHandler(request: NextRequest) {
+    const guarded = await guardLegacyAdminRequest(request, {
         successorPath: "/api/agency/content",
+        requiredRole: "viewer",
     });
-    if (redirectResponse) return redirectResponse;
-
-    const session = await getSession();
-    if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    if (!guarded.ok) return guarded.response;
 
     const { searchParams } = new URL(request.url);
-    const response = await listContentArtifactsHandler(session.orgId, {
+    const response = await listContentArtifactsHandler(guarded.organizationId, {
         type: searchParams.get("type"),
         status: searchParams.get("status"),
         page: Number(searchParams.get("page") ?? 1),
@@ -58,19 +44,19 @@ export async function GET(request: NextRequest) {
     return applyLegacyAdminApiDeprecationHeaders(response, { successorPath: "/api/agency/content" });
 }
 
-export async function PATCH(request: NextRequest) {
-    const redirectResponse = createLegacyAdminFinalRedirectResponse(request, {
+async function PATCHHandler(request: NextRequest) {
+    const guarded = await guardLegacyAdminRequest(request, {
         successorPath: "/api/agency/content",
+        requiredRole: "admin",
+        writeOperation: true,
     });
-    if (redirectResponse) return redirectResponse;
-
-    const session = await getSession();
-    if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-
-    const frozen = createLegacyAdminWriteFrozenResponse({ successorPath: "/api/agency/content" });
-    if (frozen) return frozen;
+    if (!guarded.ok) return guarded.response;
 
     const body = await request.json();
-    const response = await updateContentArtifactStatusHandler(session.orgId, session.userId, body);
+    const response = await updateContentArtifactStatusHandler(guarded.organizationId, guarded.userId, body);
     return applyLegacyAdminApiDeprecationHeaders(response, { successorPath: "/api/agency/content" });
 }
+
+export const POST = withApiLogging("/api/admin/content", "POST", POSTHandler);
+export const GET = withApiLogging("/api/admin/content", "GET", GETHandler);
+export const PATCH = withApiLogging("/api/admin/content", "PATCH", PATCHHandler);

@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { alertDailySummary } from "@/lib/ai/whatsapp-alerts";
 import { runAlertEngine } from "@/lib/whatsapp/alert-engine";
-import { logger } from "@/lib/logger";
+import { logger, withApiLogging } from "@/lib/logger";
 
 export const runtime = "nodejs";
 
@@ -12,7 +12,7 @@ export const runtime = "nodejs";
  * Sends morning briefing + scans all active alerts.
  * Auth: x-cron-secret header
  */
-export async function POST(request: Request) {
+async function POSTHandler(request: Request) {
     const secret = request.headers.get("x-cron-secret");
     if (secret !== process.env.CRON_SECRET) {
         return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
@@ -44,3 +44,5 @@ export async function POST(request: Request) {
         return NextResponse.json({ error: error.message }, { status: 500 });
     }
 }
+
+export const POST = withApiLogging("/api/cron/whatsapp-briefing", "POST", POSTHandler);

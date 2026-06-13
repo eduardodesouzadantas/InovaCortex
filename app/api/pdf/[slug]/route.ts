@@ -1,5 +1,6 @@
+import { withApiLogging } from "@/lib/logger";
 import { NextRequest, NextResponse } from "next/server";
-import { getDossierPdfStateBySlug, generateAndStoreDossierPdf } from "@/lib/pdf/dossier-service";
+import { getDossierPdfStateBySlug, queueDossierPdfGenerationBySlug } from "@/lib/pdf/dossier-service";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -7,7 +8,7 @@ export const maxDuration = 60;
 const POLL_INTERVAL_MS = 2000;
 const POLL_TIMEOUT_MS = 120000;
 
-export async function POST(
+async function POSTHandler(
     request: NextRequest,
     { params }: { params: Promise<{ slug: string }> }
 ) {
@@ -39,20 +40,20 @@ export async function POST(
     }
 
     try {
-        const result = await generateAndStoreDossierPdf({ slug });
+        const queued = await queueDossierPdfGenerationBySlug(slug);
         return NextResponse.json(
             {
-                slug: result.slug,
-                status: "ready",
-                pdfUrl: result.url,
-                requestedAt: state.requestedAt ?? new Date().toISOString(),
-                generatedAt: new Date().toISOString(),
-                error: null,
-                queueId: null,
+                slug,
+                status: queued.status,
+                pdfUrl: queued.url ?? null,
+                requestedAt: queued.requestedAt ?? state.requestedAt ?? new Date().toISOString(),
+                generatedAt: queued.generatedAt ?? state.generatedAt ?? null,
+                error: queued.error ?? null,
+                queueId: queued.queueId ?? null,
                 statusUrl: `/api/pdf/${encodeURIComponent(slug)}?mode=status`,
-                downloadUrl: result.url,
+                downloadUrl: queued.url ?? `/api/pdf/${encodeURIComponent(slug)}?mode=download`,
             },
-            { status: 200 }
+            { status: queued.status === "ready" ? 200 : 202 }
         );
     } catch (error) {
         const rawMessage = error instanceof Error ? error.message : String(error);
@@ -64,7 +65,7 @@ export async function POST(
     }
 }
 
-export async function GET(
+async function GETHandler(
     request: NextRequest,
     { params }: { params: Promise<{ slug: string }> }
 ) {
@@ -117,7 +118,7 @@ export async function GET(
         return NextResponse.redirect(buildRedirectUrl(request.url, state.url), 307);
     }
 
-    // Removed queue mapping, POST endpoint now handles synchronous blocking generation
+    const queuedState = await queueDossierPdfGenerationBySlug(slug);
 
     if (mode === "download") {
         return new NextResponse(buildPendingHtml(slug), {
@@ -133,7 +134,8 @@ export async function GET(
     return NextResponse.json(
         {
             slug,
-            status: "queued",
+            status: queuedState.status,
+            queueId: queuedState.queueId ?? null,
             statusUrl: `/api/pdf/${encodeURIComponent(slug)}?mode=status`,
             downloadUrl: `/api/pdf/${encodeURIComponent(slug)}?mode=download`,
         },
@@ -259,3 +261,5 @@ function normalizePdfErrorMessage(raw: string): string {
     return raw;
 }
 
+export const POST = withApiLogging("/api/pdf/[slug]", "POST", POSTHandler);
+export const GET = withApiLogging("/api/pdf/[slug]", "GET", GETHandler);

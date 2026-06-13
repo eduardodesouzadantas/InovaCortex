@@ -1,3 +1,4 @@
+import { withApiLogging } from "@/lib/logger";
 import { NextRequest, NextResponse } from "next/server";
 import { getSession } from "@/lib/auth/session";
 import { assertRole } from "@/lib/auth/rbac";
@@ -11,7 +12,7 @@ import { goLiveWorkspaceHandler } from "@/lib/agency/commercial/workspaces";
 export const runtime = "nodejs";
 
 /** POST /api/admin/workspaces/[id]/golive */
-export async function POST(
+async function POSTHandler(
     _request: NextRequest,
     { params }: { params: Promise<{ id: string }> },
 ) {
@@ -40,3 +41,5 @@ export async function POST(
         successorPath: `/api/agency/commercial/workspaces/${workspaceId}/golive`,
     });
 }
+
+export const POST = withApiLogging("/api/admin/workspaces/[id]/golive", "POST", POSTHandler);
