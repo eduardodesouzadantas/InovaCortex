@@ -13,8 +13,8 @@ import { requireOrgContext } from "@/lib/auth/org-context";
 import { OutboundClient } from "./outbound-client";
 
 interface Props {
-    params: { slug: string };
-    searchParams: { tab?: string; status?: string; industry?: string };
+    params: Promise<{ slug: string }>;
+    searchParams: Promise<{ tab?: string; status?: string; industry?: string }>;
 }
 
 async function getData(slug: string, filters: { status?: string; industry?: string }) {
@@ -63,11 +63,15 @@ async function getData(slug: string, filters: { status?: string; industry?: stri
 }
 
 export default async function OutboundAdminPage({ params, searchParams }: Props) {
-    let ctx;
-    try { ctx = await requireOrgContext(params.slug); }
-    catch { redirect(`/org/${params.slug}/admin/login`); }
+    const resolvedParams = await params;
+    const resolvedSearchParams = await searchParams;
+    const slug = resolvedParams.slug;
 
-    const data = await getData(params.slug, searchParams);
+    let ctx;
+    try { ctx = await requireOrgContext(slug); }
+    catch { redirect(`/org/${slug}/admin/login`); }
+
+    const data = await getData(slug, resolvedSearchParams);
     if (!data) notFound();
 
     return (
@@ -78,13 +82,13 @@ export default async function OutboundAdminPage({ params, searchParams }: Props)
                     <p className="text-gray-400 mt-1">{data.org.name} · Cadência automatizada</p>
                 </div>
                 <OutboundClient
-                    orgSlug={params.slug}
+                    orgSlug={slug}
                     prospects={data.prospects}
                     sequences={data.sequences}
                     messages={data.messages}
                     metrics={data.metrics}
-                    activeFilters={searchParams}
-                    activeTab={searchParams.tab ?? "radar"}
+                    activeFilters={resolvedSearchParams}
+                    activeTab={resolvedSearchParams.tab ?? "radar"}
                 />
             </div>
         </div>

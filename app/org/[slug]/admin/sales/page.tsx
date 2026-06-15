@@ -5,9 +5,9 @@ import { redirect, notFound } from "next/navigation";
 import { SalesDashboardClient } from "./sales-dashboard-client";
 
 interface PageProps {
-    params: {
+    params: Promise<{
         slug: string;
-    };
+    }>;
 }
 
 /**
@@ -15,13 +15,16 @@ interface PageProps {
  * Premium Sales Operations Dashboard.
  */
 export default async function SalesPage({ params }: PageProps) {
+    const resolvedParams = await params;
+    const slug = resolvedParams.slug;
+
     const session = await getSession();
-    if (!session || session.orgSlug !== params.slug) {
-        redirect(`/org/${params.slug}/admin/login`);
+    if (!session || session.orgSlug !== slug) {
+        redirect(`/org/${slug}/admin/login`);
     }
 
     const org = await prisma.organization.findUnique({
-        where: { slug: params.slug },
+        where: { slug },
         select: { id: true, name: true, slug: true },
     });
 
@@ -58,7 +61,7 @@ export default async function SalesPage({ params }: PageProps) {
                         <div className="text-gray-500 font-medium uppercase tracking-widest">Iniciando Sistemas de Vendas...</div>
                     </div>
                 }>
-                    <SalesDashboardClient orgSlug={params.slug} />
+                    <SalesDashboardClient orgSlug={slug} />
                 </Suspense>
             </div>
         </div>

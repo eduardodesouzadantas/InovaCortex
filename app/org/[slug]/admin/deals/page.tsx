@@ -14,8 +14,8 @@ import { requireOrgContext } from "@/lib/auth/org-context";
 import { DealsClient } from "./deals-client";
 
 interface Props {
-    params: { slug: string };
-    searchParams: { status?: string; tier?: string };
+    params: Promise<{ slug: string }>;
+    searchParams: Promise<{ status?: string; tier?: string }>;
 }
 
 async function getData(slug: string, filters: { status?: string; tier?: string }) {
@@ -47,11 +47,15 @@ async function getData(slug: string, filters: { status?: string; tier?: string }
 }
 
 export default async function DealsAdminPage({ params, searchParams }: Props) {
-    let ctx;
-    try { ctx = await requireOrgContext(params.slug); }
-    catch { redirect(`/org/${params.slug}/admin/login`); }
+    const resolvedParams = await params;
+    const resolvedSearchParams = await searchParams;
+    const slug = resolvedParams.slug;
 
-    const data = await getData(params.slug, searchParams);
+    let ctx;
+    try { ctx = await requireOrgContext(slug); }
+    catch { redirect(`/org/${slug}/admin/login`); }
+
+    const data = await getData(slug, resolvedSearchParams);
     if (!data) notFound();
 
     return (
@@ -62,9 +66,9 @@ export default async function DealsAdminPage({ params, searchParams }: Props) {
                     <p className="text-gray-400 mt-1">{data.org.name} · {data.packets.length} deals</p>
                 </div>
                 <DealsClient
-                    orgSlug={params.slug}
+                    orgSlug={slug}
                     packets={data.packets}
-                    activeFilters={searchParams}
+                    activeFilters={resolvedSearchParams}
                 />
             </div>
         </div>
