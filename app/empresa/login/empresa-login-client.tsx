@@ -1,13 +1,11 @@
 "use client";
 
 import Link from "next/link";
-import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { ArrowRight, Building2, Eye, EyeOff, Loader2, ShieldCheck, Sparkles } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { resolveLoginErrorMessage } from "@/lib/auth/login-error-message";
-import { resolvePostLoginPath } from "@/lib/executive/access";
 
 type LoginResponseBody = {
     error?: string;
@@ -31,7 +29,6 @@ export function EmpresaLoginClient({
     const [showPassword, setShowPassword] = useState(false);
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState("");
-    const router = useRouter();
 
     async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
         event.preventDefault();
@@ -45,21 +42,20 @@ export function EmpresaLoginClient({
                 body: JSON.stringify({ email, password }),
             });
 
-            const payload = (await response.json()) as LoginResponseBody;
+            let payload: LoginResponseBody = {};
+            try {
+                payload = await response.json();
+            } catch (e) {
+                console.warn("Failed to parse login response JSON", e);
+            }
 
-            if (!response.ok || !payload.success || !payload.orgSlug || !payload.role) {
-                setError(resolveLoginErrorMessage(payload));
+            if (response.ok) {
+                const orgSlug = payload?.orgSlug || process.env.NEXT_PUBLIC_AGENCY_ORG_SLUG || "inovacortex";
+                window.location.href = `/org/${orgSlug}/admin`;
                 return;
             }
 
-            router.push(
-                resolvePostLoginPath({
-                    orgSlug: payload.orgSlug,
-                    role: payload.role,
-                    requestedSurface: "admin",
-                }),
-            );
-            router.refresh();
+            setError(resolveLoginErrorMessage(payload));
         } catch {
             setError("Erro de conexao. Tente novamente.");
         } finally {
