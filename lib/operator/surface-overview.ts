@@ -683,13 +683,13 @@ export async function buildOperatorSurfaceOverview(orgId: string, orgSlug: strin
             where: {
                 organizationId: orgId,
                 status: { in: ["sent", "viewed"] },
-                updatedAt: { lt: seventyTwoHoursAgo },
+                createdAt: { lt: seventyTwoHoursAgo },
             },
-            orderBy: { updatedAt: "asc" },
+            orderBy: { createdAt: "asc" },
             take: 4,
             select: {
                 id: true,
-                updatedAt: true,
+                createdAt: true,
                 assessmentId: true,
                 assessment: {
                     select: {
@@ -788,16 +788,16 @@ export async function buildOperatorSurfaceOverview(orgId: string, orgSlug: strin
             where: {
                 organizationId: orgId,
                 status: { in: ["Perdido", "Lost", "perdido", "lost", "rejeitado", "rejected"] },
-                updatedAt: { gte: seventyTwoHoursAgo },
+                createdAt: { gte: seventyTwoHoursAgo },
             },
-            orderBy: { updatedAt: "desc" },
+            orderBy: { createdAt: "desc" },
             take: 10,
             select: {
                 id: true,
                 company: true,
                 status: true,
                 internalNotes: true,
-                updatedAt: true,
+                createdAt: true,
             },
         }).catch(() => []),
     ]);
@@ -895,7 +895,7 @@ export async function buildOperatorSurfaceOverview(orgId: string, orgSlug: strin
             company: a.company || "Sem nome",
             reason: meta.lostReason,
             stage: a.status,
-            updatedAt: a.updatedAt.toISOString(),
+            updatedAt: a.createdAt.toISOString(),
             isRecoverable,
             valueCents: 0,
         };

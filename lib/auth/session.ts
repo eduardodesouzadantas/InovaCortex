@@ -161,8 +161,8 @@ export async function setSessionCookie(payload: SessionPayload): Promise<void> {
     const cookieStore = await cookies();
     cookieStore.set(COOKIE_NAME, token, {
         httpOnly: true,
-        secure: process.env.NODE_ENV === "production",
-        sameSite: "strict",
+        secure: process.env.FORCE_SECURE_COOKIES === "true",
+        sameSite: "lax",
         maxAge: SESSION_TTL,
         path: "/",
     });

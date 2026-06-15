@@ -54,6 +54,41 @@ async function main() {
         select: { id: true, email: true, role: true },
     });
 
+    const agencyMembership = await prisma.agencyMembership.upsert({
+        where: {
+            userId_organizationId: {
+                userId: admin.id,
+                organizationId: organization.id,
+            },
+        },
+        update: {
+            role: "owner",
+            active: true,
+        },
+        create: {
+            userId: admin.id,
+            organizationId: organization.id,
+            role: "owner",
+            active: true,
+        },
+        select: { id: true, role: true, active: true },
+    });
+
+    await prisma.organizationAccess.upsert({
+        where: {
+            agencyMembershipId_organizationId: {
+                agencyMembershipId: agencyMembership.id,
+                organizationId: organization.id,
+            },
+        },
+        update: { active: true },
+        create: {
+            agencyMembershipId: agencyMembership.id,
+            organizationId: organization.id,
+            active: true,
+        },
+    });
+
     await prisma.systemSetting.upsert({
         where: {
             key_organizationId: {
@@ -73,6 +108,8 @@ async function main() {
         orgSlug: organization.slug,
         adminEmail: admin.email,
         role: admin.role,
+        agencyRole: agencyMembership.role,
+        agencyActive: agencyMembership.active,
     });
 }
 
